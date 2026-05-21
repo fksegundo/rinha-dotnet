@@ -1,12 +1,7 @@
 services:
   api1:
-    image: rinha-dotnet-aot-api:local
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      args:
-        RINHA_LEAF_SIZE: ${RINHA_LEAF_SIZE:-48}
-    pull_policy: never
+    image: ghcr.io/fksegundo/rinha-dotnet:latest
+    pull_policy: always
     restart: always
     logging:
       driver: "none"
@@ -27,13 +22,8 @@ services:
           memory: "165M"
 
   api2:
-    image: rinha-dotnet-aot-api:local
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      args:
-        RINHA_LEAF_SIZE: ${RINHA_LEAF_SIZE:-48}
-    pull_policy: never
+    image: ghcr.io/fksegundo/rinha-dotnet:latest
+    pull_policy: always
     restart: always
     logging:
       driver: "none"

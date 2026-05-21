@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Rinha.Api/Rinha.Api.csproj" />
-    <Project Path="src/Rinha.Preprocess/Rinha.Preprocess.csproj" />
-  </Folder>
-  <Folder Name="/test/">
-    <Project Path="test/Rinha.Tests/Rinha.Tests.csproj" />
-  </Folder>
-</Solution>
