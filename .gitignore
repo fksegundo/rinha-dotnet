@@ -1,0 +1,14 @@
+bin/
+obj/
+out/
+publish/
+*.user
+*.suo
+.vs/
+.idea/
+.cursor/
+test-data/
+resources/references.json
+resources/references.json.gz
+bench-results/
+.DS_Store

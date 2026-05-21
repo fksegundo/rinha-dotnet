@@ -1,0 +1,11 @@
+**/.git/
+**/.cursor/
+**/.vs/
+**/bin/
+**/obj/
+test/
+test-data/
+publish/
+*.user
+*.suo
+.DS_Store
