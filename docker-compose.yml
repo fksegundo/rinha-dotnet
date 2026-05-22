@@ -10,7 +10,7 @@ services:
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
       RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-512}"
       RINHA_SEARCH_MODE: key-first
-      DOTNET_ThreadPool_MinThreads: "${DOTNET_ThreadPool_MinThreads:-16}"
+      DOTNET_ThreadPool_MinThreads: "${DOTNET_ThreadPool_MinThreads:-32}"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     volumes:
@@ -18,7 +18,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.40"
+          cpus: "0.42"
           memory: "160M"
 
   api2:
@@ -30,9 +30,9 @@ services:
     environment:
       RINHA_UDS_SOCKET: /sockets/api2.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-64}"
+      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-512}"
       RINHA_SEARCH_MODE: key-first
-      DOTNET_ThreadPool_MinThreads: "${DOTNET_ThreadPool_MinThreads:-512}"
+      DOTNET_ThreadPool_MinThreads: "${DOTNET_ThreadPool_MinThreads:-32}"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     volumes:
@@ -40,7 +40,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.40"
+          cpus: "0.42"
           memory: "160M"
 
   lb:
@@ -56,7 +56,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.20"
+          cpus: "0.16"
           memory: "30M"
     depends_on:
       - api1
