@@ -8,7 +8,7 @@ services:
     environment:
       RINHA_UDS_SOCKET: /sockets/api1.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-64}"
+      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-512}"
       RINHA_SEARCH_MODE: key-first
       DOTNET_ThreadPool_MinThreads: "${DOTNET_ThreadPool_MinThreads:-16}"
       DOTNET_gcServer: "0"
@@ -32,7 +32,7 @@ services:
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
       RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-64}"
       RINHA_SEARCH_MODE: key-first
-      DOTNET_ThreadPool_MinThreads: "${DOTNET_ThreadPool_MinThreads:-16}"
+      DOTNET_ThreadPool_MinThreads: "${DOTNET_ThreadPool_MinThreads:-512}"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     volumes:
