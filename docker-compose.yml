@@ -1,6 +1,6 @@
 services:
   api1:
-    image: ghcr.io/fksegundo/rinha-dotnet:latest
+    image: ghcr.io/fksegundo/rinha-dotnet:5ccb026
     pull_policy: always
     restart: always
     logging:
@@ -18,11 +18,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.45"
-          memory: "165M"
+          cpus: "0.40"
+          memory: "160M"
 
   api2:
-    image: ghcr.io/fksegundo/rinha-dotnet:latest
+    image: ghcr.io/fksegundo/rinha-dotnet:5ccb026
     pull_policy: always
     restart: always
     logging:
@@ -40,8 +40,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.45"
-          memory: "165M"
+          cpus: "0.40"
+          memory: "160M"
 
   lb:
     image: ${LB_IMAGE:-haproxy:3.0.9-alpine}
@@ -56,8 +56,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.10"
-          memory: "20M"
+          cpus: "0.20"
+          memory: "30M"
     depends_on:
       - api1
       - api2
