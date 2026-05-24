@@ -6,7 +6,7 @@
 [![Native AOT](https://img.shields.io/badge/Native-AOT-blue)](https://learn.microsoft.com/dotnet/core/deploying/native-aot/)
 [![Docker](https://img.shields.io/badge/Docker-GHCR-2496ED?logo=docker&logoColor=white)](https://github.com/fksegundo/rinha-dotnet/pkgs/container/rinha-dotnet)
 
-**[Rinha de Backend 2026](https://github.com/zanfranceschi/rinha-de-backend-2026)** submission in **.NET 11 Native AOT**: exact kNN fraud detection (k=5) over a quantized spatial index, served by **Kestrel** behind **HAProxy** over Unix domain sockets.
+**[Rinha de Backend 2026](https://github.com/zanfranceschi/rinha-de-backend-2026)** submission in **.NET 11 Native AOT**: exact kNN fraud detection (k=5) over a quantized spatial index, served behind a **Rust load balancer** with Unix socket FD passing.
 
 > **Português:** see [docs/README.pt-BR.md](docs/README.pt-BR.md)
 
@@ -15,7 +15,7 @@
 The API accepts transactions on `POST /fraud-score`, extracts a 14-dimensional vector, queries a pre-built **RNSPCST1** index (3M references), and returns a fraud score and approval flag. The production binary is **Native AOT** for `linux-x64` with no managed runtime.
 
 ```
-Client → HAProxy :9999 → api1 / api2 (Unix domain sockets)
+Client → Rust LB :9999 → api1 / api2 (SCM_RIGHTS FD passing)
                               ↓
                          mmap index + AVX2 search
 ```
@@ -25,7 +25,7 @@ Client → HAProxy :9999 → api1 / api2 (Unix domain sockets)
 | `Rinha.Api` | HTTP API (`/ready`, `/fraud-score`) |
 | `Rinha.Preprocess` | Builds the index from `references.json.gz` |
 | `Rinha.Verify` | CLI to validate responses against a test dataset |
-| HAProxy | Load balancer on port **9999** (TCP mode) |
+| Rust LB | Load balancer on port **9999** (`ghcr.io/fksegundo/rinha-api-lb`) |
 | 2× API | Replicas within challenge CPU/RAM limits |
 
 ## Benchmark tuning
@@ -35,9 +35,9 @@ Production settings were chosen from local benchmark matrices (score **6000**, *
 | Document | Scope |
 | --- | --- |
 | [docs/benchmark-matrix.md](docs/benchmark-matrix.md) | API tuning — warmup, thread pool, leaf size |
-| [docs/proxy-benchmark-matrix.md](docs/proxy-benchmark-matrix.md) | Load balancer tuning — HAProxy TCP vs HTTP, nginx comparison |
+| [docs/proxy-benchmark-matrix.md](docs/proxy-benchmark-matrix.md) | Historical load balancer tuning — HAProxy/nginx comparison |
 
-Recommended stack config: `RINHA_WARMUP_QUERIES=64`, `DOTNET_ThreadPool_MinThreads=16`, `RINHA_LEAF_SIZE=48`, HAProxy **TCP mode** with `tcp-check inter 50ms`.
+Recommended stack config: `RINHA_WARMUP_QUERIES=64`, `DOTNET_ThreadPool_MinThreads=16`, `RINHA_LEAF_SIZE=48`, Rust LB with FD passing.
 
 ## Endpoints
 
@@ -65,7 +65,7 @@ curl http://localhost:9999/ready
 # ok
 ```
 
-Builds the Docker image, starts **api1**, **api2**, and **HAProxy**, then waits for readiness.
+Builds the Docker image, starts **api1**, **api2**, and the **Rust LB**, then waits for readiness.
 
 ```bash
 make down    # stop the stack
@@ -97,8 +97,8 @@ docker pull ghcr.io/fksegundo/rinha-dotnet:latest
 
 Defined in `docker/docker-compose.yml`:
 
-- **HAProxy** exposes `:9999` and balances across two API instances
-- LB → API traffic uses **Unix domain sockets** (`/sockets/*.sock`) on a tmpfs volume
+- **Rust LB** (`ghcr.io/fksegundo/rinha-api-lb`) exposes `:9999` and hands TCP connections to the APIs via **SCM_RIGHTS**
+- LB → API control channels use **Unix domain sockets** (`/sockets/*.sock`) on a tmpfs volume
 - Resource limits: `0.45 + 0.45 + 0.10` CPU, `165M + 165M + 20M` RAM
 
 The image is multi-stage: index preprocess at build time, AOT publish with `IlcInstructionSet=avx2`, slim `runtime-deps` runtime (~10 MB binary).
@@ -122,7 +122,8 @@ dotnet run --project src/Rinha.Verify -c Release -- \
 
 | Variable | Default (compose) | Description |
 | --- | --- | --- |
-| `RINHA_UDS_SOCKET` | *(required)* | Unix socket path (e.g. `/sockets/api1.sock`) |
+| `RINHA_FD_SOCKET` | *(required in compose)* | FD-passing control socket (e.g. `/sockets/api1.sock`) |
+| `RINHA_UDS_SOCKET` | — | Kestrel UDS path for local dev without the Rust LB |
 | `RINHA_INDEX_PATH` | `/app/index/rinha-specialist.idx` | Index file path |
 | `RINHA_WARMUP_QUERIES` | `64` | Warmup queries before `/ready` |
 | `RINHA_SEARCH_MODE` | `key-first` | Index search strategy |
@@ -135,15 +136,15 @@ dotnet run --project src/Rinha.Verify -c Release -- \
 
 ```
 src/
-  Rinha.Api/          Kestrel API (parser, index, endpoints)
+  Rinha.Api/          HTTP API (parser, index, endpoints)
   Rinha.Preprocess/   RNSPCST1 index builder
   Rinha.Verify/       Dataset verifier CLI
 test/
   Rinha.Tests/        Automated tests
 docker/
   Dockerfile          AOT build + preprocess
-  docker-compose.yml  HAProxy + 2 APIs (UDS)
-  haproxy.cfg         HAProxy configuration
+  docker-compose.yml  Rust LB + 2 APIs (FD passing)
+  haproxy.cfg         Legacy HAProxy config (benchmark override via `LB_IMAGE`)
 docs/
   README.pt-BR.md              Portuguese documentation
   benchmark-matrix.md          API benchmark results
@@ -159,7 +160,7 @@ resources/
 - **kNN:** exact search with k=5; precomputed JSON responses
 - **Index:** `mmap` + `madvise`; **AVX2** search when available
 - **Body:** `ArrayPool` + `ReadExactlyAsync` (no per-request allocation)
-- **Readiness:** async warmup; wait for `GET /ready` before load tests (HAProxy **TCP mode** — health check is socket-only)
+- **Readiness:** async warmup; wait for `GET /ready` before load tests
 
 ## Git hooks
 

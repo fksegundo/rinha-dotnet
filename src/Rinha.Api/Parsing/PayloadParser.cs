@@ -27,7 +27,7 @@ public static class PayloadParser
 
         output.Clear();
 
-        return PayloadFallbackJson.TryParse(payload, output);
+        return PayloadFlexibleJson.TryParse(payload, output);
     }
 
     internal static ParsedDateTime? ParseDateTimePublic(ReadOnlySpan<byte> iso)

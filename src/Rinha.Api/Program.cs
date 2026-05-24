@@ -7,13 +7,15 @@ using Rinha.Api.Vector;
 
 ThreadPoolBootstrap.Configure();
 
-var builder = WebApplication.CreateSlimBuilder(args);
-KestrelBootstrap.Configure(builder);
+if (RinhaOptions.MlockAll)
+    MemoryLock.TryLockAll(RinhaOptions.MlockAllMode);
 
 SpecialistIndex index;
 try
 {
     index = SpecialistIndex.Open(RinhaOptions.IndexPath);
+    if (RinhaOptions.MlockIndex)
+        index.MlockMapping();
 }
 catch (Exception ex)
 {
@@ -23,9 +25,24 @@ catch (Exception ex)
 }
 
 var state = new AppState(index);
-builder.Services.AddSingleton(state);
 
-var app = builder.Build();
+if (RinhaOptions.UseFdPassing)
+{
+    try
+    {
+        StartupWarmup.RunDefault(state.Index);
+        state.MarkReady();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"warmup failed: {ex.Message}");
+        Environment.Exit(1);
+        return;
+    }
+
+    FdSocketServer.Run(RinhaOptions.FdSocketPath!, state);
+    return;
+}
 
 _ = Task.Run(() =>
 {
@@ -40,6 +57,12 @@ _ = Task.Run(() =>
         Environment.Exit(1);
     }
 });
+
+var builder = WebApplication.CreateSlimBuilder(args);
+KestrelBootstrap.Configure(builder);
+builder.Services.AddSingleton(state);
+
+var app = builder.Build();
 
 app.MapGet("/ready", (AppState s) =>
     s.Ready ? Results.Text("ok", "text/plain") : Results.StatusCode(503));

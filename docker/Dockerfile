@@ -29,9 +29,13 @@ RUN dotnet publish src/Rinha.Api/Rinha.Api.csproj -c Release -o /out/app \
     --no-restore
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:11.0-preview AS final
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libmimalloc3 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /out/app/ ./
 COPY --from=build /out/index/ ./index/
 ENV RINHA_INDEX_PATH=/app/index/rinha-specialist.idx
 ENV RINHA_SEARCH_MODE=key-first
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libmimalloc.so.3
 ENTRYPOINT ["/app/Rinha.Api"]

@@ -6,6 +6,9 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using Microsoft.Win32.SafeHandles;
 
+using Rinha.Api.Options;
+using Rinha.Api.Runtime;
+
 namespace Rinha.Api.Index;
 
 public sealed unsafe class SpecialistIndex : IDisposable
@@ -14,8 +17,6 @@ public sealed unsafe class SpecialistIndex : IDisposable
     private MemoryMappedViewAccessor? _accessor;
     private SafeMemoryMappedViewHandle? _handle;
     private byte* _ptr;
-    private byte* _partitionsPtr;
-    private byte* _nodesPtr;
     private int _referenceCount;
     private int _partitionCount;
     private int _nodeCount;
@@ -23,9 +24,12 @@ public sealed unsafe class SpecialistIndex : IDisposable
     private byte* _vectorsPtr;
     private byte* _labelsPtr;
 
+    private PartitionRecord[] _partitions = [];
+    private NodeRecord[] _nodes = [];
     private short[] _partitionByKey = [];
     private bool _hasAvx2;
     private SearchMode _searchMode;
+    private long _earlyExitThreshold;
 
     public static SpecialistIndex Open(string path)
     {
@@ -58,29 +62,44 @@ public sealed unsafe class SpecialistIndex : IDisposable
         _nodeCount = ReadI32(_ptr, 24);
         _blockCount = ReadI32(_ptr, 28);
 
-        _partitionsPtr = _ptr + 32;
-        _nodesPtr = _partitionsPtr + (_partitionCount * IndexFormat.RecordSize);
+        byte* partitionsPtr = _ptr + 32;
+        byte* nodesPtr = partitionsPtr + (_partitionCount * IndexFormat.RecordSize);
 
-        int vectorsOffset = (int)(_nodesPtr - _ptr) + (_nodeCount * IndexFormat.RecordSize);
+        int vectorsOffset = (int)(nodesPtr - _ptr) + (_nodeCount * IndexFormat.RecordSize);
         int labelsOffset = vectorsOffset + (_blockCount * SearchConstants.Dims * SearchConstants.Lanes * 2);
 
         _vectorsPtr = _ptr + vectorsOffset;
         _labelsPtr = _ptr + labelsOffset;
 
+        LoadTreeMetadata(partitionsPtr, nodesPtr);
         BuildPartitionLookup();
 
-        IndexMemory.AdviseWillNeed((IntPtr)_ptr, (nint)_accessor!.Capacity);
-        IndexMemory.AdviseWillNeed((IntPtr)_vectorsPtr, (nint)(_blockCount * SearchConstants.Dims * SearchConstants.Lanes * 2));
-        IndexMemory.AdviseWillNeed((IntPtr)_labelsPtr, (nint)(_blockCount * SearchConstants.Lanes));
+        nint mapLen = (nint)_accessor!.Capacity;
+        IndexMemory.AdviseWillNeed((IntPtr)_ptr, mapLen);
+        IndexMemory.AdviseHugePage((IntPtr)_ptr, mapLen);
+        IndexMemory.AdviseHugePage((IntPtr)_vectorsPtr, _blockCount * SearchConstants.Dims * SearchConstants.Lanes * 2);
+        IndexMemory.AdviseHugePage((IntPtr)_labelsPtr, _blockCount * SearchConstants.Lanes);
 
         _hasAvx2 = Avx2.IsSupported;
+        _earlyExitThreshold = RinhaOptions.EarlyExitThreshold;
         _searchMode = (Environment.GetEnvironmentVariable("RINHA_SEARCH_MODE") ?? "key-first") switch
         {
             "exact" => SearchMode.Exact,
             "specialist" => SearchMode.Specialist,
-            "key-first" or "key_first" => SearchMode.KeyFirst,
             _ => SearchMode.KeyFirst
         };
+    }
+
+    private void LoadTreeMetadata(byte* partitionsPtr, byte* nodesPtr)
+    {
+        _partitions = new PartitionRecord[_partitionCount];
+        _nodes = new NodeRecord[_nodeCount];
+
+        for (int i = 0; i < _partitionCount; i++)
+            _partitions[i] = Unsafe.ReadUnaligned<PartitionRecord>(partitionsPtr + (i * IndexFormat.RecordSize));
+
+        for (int i = 0; i < _nodeCount; i++)
+            _nodes[i] = Unsafe.ReadUnaligned<NodeRecord>(nodesPtr + (i * IndexFormat.RecordSize));
     }
 
     private void BuildPartitionLookup()
@@ -90,10 +109,18 @@ public sealed unsafe class SpecialistIndex : IDisposable
 
         for (int i = 0; i < _partitionCount; i++)
         {
-            uint key = (uint)ReadI32(_partitionsPtr, i * IndexFormat.RecordSize);
+            uint key = (uint)_partitions[i].Key;
             if (key < IndexFormat.PartitionKeySlots)
                 _partitionByKey[key] = (short)i;
         }
+    }
+
+    public void MlockMapping()
+    {
+        if (_accessor is null || _ptr == null)
+            return;
+
+        MemoryLock.TryLockRegion((IntPtr)_ptr, (nuint)(ulong)_accessor.Capacity);
     }
 
     public byte PredictFraudCount(Span<short> query)
@@ -166,12 +193,11 @@ public sealed unsafe class SpecialistIndex : IDisposable
 
         for (int idx = 0; idx < _partitionCount; idx++)
         {
-            byte* record = _partitionsPtr + (idx * IndexFormat.RecordSize);
-            long bound = LowerBoundBoxRecord(query, record);
+            long bound = LowerBoundBoxRecord(query, ref _partitions[idx]);
             partitionEntries[partitionLen++] = (bound, idx);
         }
 
-        partitionEntries.Slice(0, partitionLen).Sort((a, b) => a.bound.CompareTo(b.bound));
+        SortPartitionEntries(partitionEntries, partitionLen);
 
         for (int i = 0; i < partitionLen; i++)
         {
@@ -179,7 +205,7 @@ public sealed unsafe class SpecialistIndex : IDisposable
             if (bound >= bestDists[SearchConstants.K - 1])
                 break;
 
-            SearchNodeIterative(ReadI32(_partitionsPtr, idx * IndexFormat.RecordSize + 4), bound, query, bestDists, bestLabels);
+            SearchNodeIterative(_partitions[idx].Root, bound, query, bestDists, bestLabels);
         }
     }
 
@@ -190,10 +216,14 @@ public sealed unsafe class SpecialistIndex : IDisposable
 
         if (primaryIdx >= 0)
         {
-            byte* record = _partitionsPtr + (primaryIdx * IndexFormat.RecordSize);
-            long bound = LowerBoundBoxRecord(query, record);
+            ref PartitionRecord primary = ref _partitions[primaryIdx];
+            long bound = LowerBoundBoxRecord(query, ref primary);
             if (bound < bestDists[SearchConstants.K - 1])
-                SearchNodeIterative(ReadI32(record, 4), bound, query, bestDists, bestLabels);
+            {
+                SearchNodeIterative(primary.Root, bound, query, bestDists, bestLabels);
+                if (ShouldEarlyExit(bestDists))
+                    return;
+            }
         }
 
         Span<(long bound, int idx)> partitionEntries = stackalloc (long, int)[SearchConstants.MaxPartitions];
@@ -204,12 +234,11 @@ public sealed unsafe class SpecialistIndex : IDisposable
             if (idx == primaryIdx)
                 continue;
 
-            byte* record = _partitionsPtr + (idx * IndexFormat.RecordSize);
-            long bound = LowerBoundBoxRecord(query, record);
+            long bound = LowerBoundBoxRecord(query, ref _partitions[idx]);
             partitionEntries[partitionLen++] = (bound, idx);
         }
 
-        partitionEntries.Slice(0, partitionLen).Sort((a, b) => a.bound.CompareTo(b.bound));
+        SortPartitionEntries(partitionEntries, partitionLen);
 
         for (int i = 0; i < partitionLen; i++)
         {
@@ -217,7 +246,9 @@ public sealed unsafe class SpecialistIndex : IDisposable
             if (bound >= bestDists[SearchConstants.K - 1])
                 break;
 
-            SearchNodeIterative(ReadI32(_partitionsPtr, idx * IndexFormat.RecordSize + 4), bound, query, bestDists, bestLabels);
+            SearchNodeIterative(_partitions[idx].Root, bound, query, bestDists, bestLabels);
+            if (ShouldEarlyExit(bestDists))
+                break;
         }
     }
 
@@ -234,20 +265,21 @@ public sealed unsafe class SpecialistIndex : IDisposable
         {
             if (currentBound <= bestDists[SearchConstants.K - 1])
             {
-                byte* record = _nodesPtr + (current * IndexFormat.RecordSize);
-                int left = ReadI32(record, 0);
-                int right = ReadI32(record, 4);
+                ref NodeRecord node = ref _nodes[current];
+                int left = node.Left;
+                int right = node.Right;
 
                 if (left < 0 || right < 0)
                 {
-                    ScanLeaf(ReadI32(record, 8), ReadI32(record, 12), query, bestDists, bestLabels);
+                    ScanLeaf(node.Start, node.Len, query, bestDists, bestLabels);
                 }
                 else
                 {
-                    byte* leftRecord = _nodesPtr + (left * IndexFormat.RecordSize);
-                    byte* rightRecord = _nodesPtr + (right * IndexFormat.RecordSize);
-                    long lb = LowerBoundBoxRecord(query, leftRecord);
-                    long rb = LowerBoundBoxRecord(query, rightRecord);
+                    if (Sse.IsSupported)
+                        Sse.Prefetch0(Unsafe.AsPointer(ref _nodes[right]));
+
+                    long lb = LowerBoundBoxRecord(query, ref _nodes[left]);
+                    long rb = LowerBoundBoxRecord(query, ref _nodes[right]);
 
                     int nearIdx;
                     long nearBound;
@@ -328,6 +360,20 @@ public sealed unsafe class SpecialistIndex : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long LowerBoundBoxRecord(Span<short> query, ref PartitionRecord record)
+    {
+        fixed (PartitionRecord* ptr = &record)
+            return LowerBoundBoxRecord(query, (byte*)ptr);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long LowerBoundBoxRecord(Span<short> query, ref NodeRecord record)
+    {
+        fixed (NodeRecord* ptr = &record)
+            return LowerBoundBoxRecord(query, (byte*)ptr);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long LowerBoundBoxRecord(Span<short> query, byte* record)
     {
         byte* minPtr = record + IndexFormat.BoundsMinOffset;
@@ -335,6 +381,26 @@ public sealed unsafe class SpecialistIndex : IDisposable
         return _hasAvx2
             ? LowerBoundBoxAvx2Ptr(query, minPtr, maxPtr)
             : LowerBoundBoxScalarPtr(query, minPtr, maxPtr);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool ShouldEarlyExit(Span<long> bestDists) =>
+        _earlyExitThreshold > 0 && bestDists[SearchConstants.K - 1] < _earlyExitThreshold;
+
+    private static void SortPartitionEntries(Span<(long bound, int idx)> entries, int length)
+    {
+        for (int i = 1; i < length; i++)
+        {
+            var current = entries[i];
+            int j = i - 1;
+            while (j >= 0 && entries[j].bound > current.bound)
+            {
+                entries[j + 1] = entries[j];
+                j--;
+            }
+
+            entries[j + 1] = current;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -422,34 +488,42 @@ public sealed unsafe class SpecialistIndex : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static unsafe void ScanBlockAvx2(byte* vectors, int blockBase, Span<short> query, Span<long> outDists)
     {
-        Vector256<int> sum32 = Vector256<int>.Zero;
         Vector256<long> sum64Lo = Vector256<long>.Zero;
         Vector256<long> sum64Hi = Vector256<long>.Zero;
+        Vector128<int> sum32Lo = Vector128<int>.Zero;
+        Vector128<int> sum32Hi = Vector128<int>.Zero;
         short* vPtr = (short*)vectors;
 
-        for (int d = 0; d < SearchConstants.Dims; d++)
+        for (int d = 0; d < SearchConstants.Dims; d += 2)
         {
-            Vector128<short> qVec = Vector128.Create(query[d]);
-            Vector128<short> vVec = Unsafe.ReadUnaligned<Vector128<short>>(vPtr + blockBase + d * SearchConstants.Lanes);
-            Vector128<short> diff = Sse2.Subtract(qVec, vVec);
-            Vector256<int> diff32 = Avx2.ConvertToVector256Int32(diff);
-            Vector256<int> sq = Avx2.MultiplyLow(diff32, diff32);
-            sum32 = Avx2.Add(sum32, sq);
+            Vector128<short> q0 = Vector128.Create(query[d]);
+            Vector128<short> q1 = Vector128.Create(query[d + 1]);
+            Vector128<short> v0 = Unsafe.ReadUnaligned<Vector128<short>>(vPtr + blockBase + d * SearchConstants.Lanes);
+            Vector128<short> v1 = Unsafe.ReadUnaligned<Vector128<short>>(vPtr + blockBase + (d + 1) * SearchConstants.Lanes);
 
-            if ((d + 1) % 4 == 0)
+            Vector128<short> diff0 = Sse2.Subtract(q0, v0);
+            Vector128<short> diff1 = Sse2.Subtract(q1, v1);
+
+            Vector128<short> lo = Sse2.UnpackLow(diff0, diff1);
+            Vector128<short> hi = Sse2.UnpackHigh(diff0, diff1);
+
+            Vector128<int> sqLo = Sse2.MultiplyAddAdjacent(lo, lo);
+            Vector128<int> sqHi = Sse2.MultiplyAddAdjacent(hi, hi);
+
+            sum32Lo = Sse2.Add(sum32Lo, sqLo);
+            sum32Hi = Sse2.Add(sum32Hi, sqHi);
+
+            if ((d + 2) % 4 == 0)
             {
-                Vector256<long> lo = Avx2.ConvertToVector256Int64(sum32.GetLower());
-                Vector256<long> hi = Avx2.ConvertToVector256Int64(sum32.GetUpper());
-                sum64Lo = Avx2.Add(sum64Lo, lo);
-                sum64Hi = Avx2.Add(sum64Hi, hi);
-                sum32 = Vector256<int>.Zero;
+                sum64Lo = Avx2.Add(sum64Lo, Avx2.ConvertToVector256Int64(sum32Lo));
+                sum64Hi = Avx2.Add(sum64Hi, Avx2.ConvertToVector256Int64(sum32Hi));
+                sum32Lo = Vector128<int>.Zero;
+                sum32Hi = Vector128<int>.Zero;
             }
         }
 
-        Vector256<long> loFinal = Avx2.ConvertToVector256Int64(sum32.GetLower());
-        Vector256<long> hiFinal = Avx2.ConvertToVector256Int64(sum32.GetUpper());
-        sum64Lo = Avx2.Add(sum64Lo, loFinal);
-        sum64Hi = Avx2.Add(sum64Hi, hiFinal);
+        sum64Lo = Avx2.Add(sum64Lo, Avx2.ConvertToVector256Int64(sum32Lo));
+        sum64Hi = Avx2.Add(sum64Hi, Avx2.ConvertToVector256Int64(sum32Hi));
 
         fixed (long* outPtr = outDists)
         {

@@ -8,6 +8,9 @@ public static class KestrelBootstrap
 {
     public static void Configure(WebApplicationBuilder builder)
     {
+        if (RinhaOptions.UseFdPassing)
+            return;
+
         builder.Logging.ClearProviders();
 
         string socketPath = RinhaOptions.UnixSocketPath;
