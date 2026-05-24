@@ -1,78 +1,63 @@
 services:
   api1:
-    image: ghcr.io/fksegundo/rinha-dotnet:5d33c96
+    image: ghcr.io/fksegundo/rinha-dotnet:5ccb026
     pull_policy: always
     restart: always
     logging:
       driver: "none"
     environment:
-      RINHA_FD_SOCKET: /sockets/api1.sock
+      RINHA_UDS_SOCKET: /sockets/api1.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-4096}"
+      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-512}"
       RINHA_SEARCH_MODE: key-first
-      RINHA_THREAD_POOL_SIZE: "${RINHA_THREAD_POOL_SIZE:-256}"
-      RINHA_MLOCK_ALL: "${RINHA_MLOCK_ALL:-1}"
-      RINHA_MLOCK_INDEX: "${RINHA_MLOCK_INDEX:-1}"
-      RINHA_MLOCK_ALL_MODE: "${RINHA_MLOCK_ALL_MODE:-future}"
+      DOTNET_ThreadPool_MinThreads: "${DOTNET_ThreadPool_MinThreads:-32}"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
     volumes:
       - sockets:/sockets
     deploy:
       resources:
         limits:
-          cpus: "0.48"
-          memory: "172M"
+          cpus: "0.42"
+          memory: "160M"
 
   api2:
-    image: ghcr.io/fksegundo/rinha-dotnet:5d33c96
+    image: ghcr.io/fksegundo/rinha-dotnet:5ccb026
     pull_policy: always
     restart: always
     logging:
       driver: "none"
     environment:
-      RINHA_FD_SOCKET: /sockets/api2.sock
+      RINHA_UDS_SOCKET: /sockets/api2.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-4096}"
+      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-512}"
       RINHA_SEARCH_MODE: key-first
-      RINHA_THREAD_POOL_SIZE: "${RINHA_THREAD_POOL_SIZE:-256}"
-      RINHA_MLOCK_ALL: "${RINHA_MLOCK_ALL:-1}"
-      RINHA_MLOCK_INDEX: "${RINHA_MLOCK_INDEX:-1}"
-      RINHA_MLOCK_ALL_MODE: "${RINHA_MLOCK_ALL_MODE:-future}"
+      DOTNET_ThreadPool_MinThreads: "${DOTNET_ThreadPool_MinThreads:-32}"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
     volumes:
       - sockets:/sockets
     deploy:
       resources:
         limits:
-          cpus: "0.48"
-          memory: "172M"
+          cpus: "0.42"
+          memory: "160M"
 
   lb:
-    image: ${LB_IMAGE:-ghcr.io/fksegundo/rinha-api-lb:latest}
-    pull_policy: always
+    image: ${LB_IMAGE:-haproxy:3.0.9-alpine}
     restart: always
-    user: "0:0"
     ports:
       - "9999:9999"
     logging:
       driver: "none"
     volumes:
+      - ${PROXY_CONFIG_HOST:-./haproxy.cfg}:${PROXY_CONFIG_CONTAINER:-/usr/local/etc/haproxy/haproxy.cfg}:ro
       - sockets:/sockets
     deploy:
       resources:
         limits:
-          cpus: "0.04"
-          memory: "6M"
+          cpus: "0.16"
+          memory: "30M"
     depends_on:
       - api1
       - api2
