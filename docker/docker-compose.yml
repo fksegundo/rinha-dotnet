@@ -13,7 +13,8 @@ services:
     environment:
       RINHA_FD_SOCKET: /sockets/api1.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-4096}"
+      RINHA_RUNTIME: "${RINHA_RUNTIME:-event-loop}"
+      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-64}"
       RINHA_SEARCH_MODE: key-first
       RINHA_THREAD_POOL_SIZE: "${RINHA_THREAD_POOL_SIZE:-256}"
       RINHA_MLOCK_ALL: "${RINHA_MLOCK_ALL:-1}"
@@ -30,8 +31,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.48"
-          memory: "172M"
+          cpus: "0.45"
+          memory: "167M"
 
   api2:
     image: rinha-dotnet-aot-api:local
@@ -48,7 +49,8 @@ services:
     environment:
       RINHA_FD_SOCKET: /sockets/api2.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-4096}"
+      RINHA_RUNTIME: "${RINHA_RUNTIME:-event-loop}"
+      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-64}"
       RINHA_SEARCH_MODE: key-first
       RINHA_THREAD_POOL_SIZE: "${RINHA_THREAD_POOL_SIZE:-256}"
       RINHA_MLOCK_ALL: "${RINHA_MLOCK_ALL:-1}"
@@ -65,12 +67,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.48"
-          memory: "172M"
+          cpus: "0.45"
+          memory: "167M"
 
   lb:
-    image: ${LB_IMAGE:-ghcr.io/fksegundo/rinha-api-lb:latest}
-    pull_policy: always
+    image: rinha-dotnet-lb:local
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.lb
+    pull_policy: never
     restart: always
     user: "0:0"
     ports:
@@ -82,8 +87,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.04"
-          memory: "6M"
+          cpus: "${LB_CPUS:-0.10}"
+          memory: "16M"
     depends_on:
       - api1
       - api2

@@ -3,6 +3,7 @@ using Rinha.Api.Index;
 using Rinha.Api.Options;
 using Rinha.Api.Parsing;
 using Rinha.Api.Runtime;
+using Rinha.Api.Runtime.EventLoop;
 using Rinha.Api.Vector;
 
 ThreadPoolBootstrap.Configure();
@@ -28,10 +29,12 @@ var state = new AppState(index);
 
 if (RinhaOptions.UseFdPassing)
 {
+    if (OperatingSystem.IsLinux())
+        Syscalls.IgnoreSigPipe();
+
     try
     {
         StartupWarmup.RunDefault(state.Index);
-        state.MarkReady();
     }
     catch (Exception ex)
     {
@@ -40,7 +43,12 @@ if (RinhaOptions.UseFdPassing)
         return;
     }
 
-    FdSocketServer.Run(RinhaOptions.FdSocketPath!, state);
+    Action markReady = () => state.MarkReady();
+
+    if (RinhaOptions.UseEventLoop)
+        EpollLoop.Run(RinhaOptions.FdSocketPath!, state, markReady);
+    else
+        FdSocketServer.Run(RinhaOptions.FdSocketPath!, state, markReady);
     return;
 }
 

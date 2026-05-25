@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using Rinha.Api.Options;
 using Rinha.Api.Parsing;
 using Rinha.Api.Runtime;
+using Rinha.Api.Runtime.EventLoop;
 using Rinha.Api.Vector;
 
 namespace Rinha.Api.Http;
@@ -28,7 +29,18 @@ public static class RawHttpHandler
 
                 while (processed < used)
                 {
-                    switch (RawHttpParser.TryParse(buffer.Slice(processed, used - processed), out var request, out int consumed, out ReadOnlyMemory<byte> reject))
+                    ReadOnlySpan<byte> slice = buffer.Slice(processed, used - processed);
+                    if (FraudScoreFastPath.TryHandle(slice, state, out ReadOnlyMemory<byte> fastResponse, out int fastConsumed, out bool fastKeepAlive))
+                    {
+                        processed += fastConsumed;
+                        if (!TrySendAll(socket, fastResponse))
+                            return;
+                        if (!fastKeepAlive)
+                            return;
+                        continue;
+                    }
+
+                    switch (RawHttpParser.TryParse(slice, out var request, out int consumed, out ReadOnlyMemory<byte> reject))
                     {
                         case RawHttpParseResult.Complete:
                         {
@@ -146,7 +158,7 @@ public static class RawHttpHandler
         }
     }
 
-    private static ReadOnlyMemory<byte> BuildResponse(in RawHttpRequest request, AppState state)
+    internal static ReadOnlyMemory<byte> BuildResponse(in RawHttpRequest request, AppState state)
     {
         if (request.Method == RawHttpMethod.Get && request.Path.SequenceEqual("/ready"u8))
             return state.Ready ? RawHttpResponses.Ready : RawHttpResponses.NotReady;

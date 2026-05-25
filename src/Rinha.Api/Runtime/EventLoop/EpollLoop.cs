@@ -1,11 +1,10 @@
 using System.Net.Sockets;
 using Microsoft.Win32.SafeHandles;
-using Rinha.Api.Http;
-using Rinha.Api.Options;
+using Rinha.Api.Runtime;
 
-namespace Rinha.Api.Runtime;
+namespace Rinha.Api.Runtime.EventLoop;
 
-public static class FdSocketServer
+public static class EpollLoop
 {
     public static void Run(string socketPath, AppState state, Action onListenerReady)
     {

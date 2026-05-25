@@ -11,6 +11,9 @@ public static class RinhaOptions
     public static bool UseFdPassing =>
         !string.IsNullOrWhiteSpace(FdSocketPath);
 
+    public static string RuntimeMode =>
+        Environment.GetEnvironmentVariable("RINHA_RUNTIME") ?? "event-loop";
+
     public static string UnixSocketPath =>
         Environment.GetEnvironmentVariable("RINHA_UDS_SOCKET")
         ?? throw new InvalidOperationException("RINHA_UDS_SOCKET is required when RINHA_FD_SOCKET is not set");
@@ -54,4 +57,7 @@ public static class RinhaOptions
             return UseFdPassing ? 64 : 32;
         }
     }
+
+    public static bool UseEventLoop =>
+        UseFdPassing && RuntimeMode.Equals("event-loop", StringComparison.OrdinalIgnoreCase);
 }

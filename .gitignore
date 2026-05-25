@@ -8,6 +8,7 @@ publish/
 .idea/
 .cursor/
 test-data/
+resources/test-data.json
 resources/references.json
 resources/references.json.gz
 bench-results/
