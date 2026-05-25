@@ -1,6 +1,6 @@
 services:
   api1:
-    image: ghcr.io/fksegundo/rinha-dotnet:5d33c96
+    image: ghcr.io/fksegundo/rinha-dotnet:latest
     pull_policy: always
     restart: always
     logging:
@@ -8,12 +8,13 @@ services:
     environment:
       RINHA_FD_SOCKET: /sockets/api1.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-4096}"
+      RINHA_RUNTIME: event-loop
+      RINHA_WARMUP_QUERIES: "64"
       RINHA_SEARCH_MODE: key-first
-      RINHA_THREAD_POOL_SIZE: "${RINHA_THREAD_POOL_SIZE:-64}"
-      RINHA_MLOCK_ALL: "${RINHA_MLOCK_ALL:-1}"
-      RINHA_MLOCK_INDEX: "${RINHA_MLOCK_INDEX:-1}"
-      RINHA_MLOCK_ALL_MODE: "${RINHA_MLOCK_ALL_MODE:-future}"
+      RINHA_THREAD_POOL_SIZE: "256"
+      RINHA_MLOCK_ALL: "1"
+      RINHA_MLOCK_INDEX: "1"
+      RINHA_MLOCK_ALL_MODE: future
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     ulimits:
@@ -25,24 +26,26 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.48"
-          memory: "170M"
+          cpus: "0.45"
+          memory: "167M"
 
   api2:
-    image: ghcr.io/fksegundo/rinha-dotnet:5d33c96
+    image: ghcr.io/fksegundo/rinha-dotnet:latest
     pull_policy: always
     restart: always
+    network_mode: "none"
     logging:
       driver: "none"
     environment:
       RINHA_FD_SOCKET: /sockets/api2.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-4096}"
+      RINHA_RUNTIME: event-loop
+      RINHA_WARMUP_QUERIES: "64"
       RINHA_SEARCH_MODE: key-first
-      RINHA_THREAD_POOL_SIZE: "${RINHA_THREAD_POOL_SIZE:-64}"
-      RINHA_MLOCK_ALL: "${RINHA_MLOCK_ALL:-1}"
-      RINHA_MLOCK_INDEX: "${RINHA_MLOCK_INDEX:-1}"
-      RINHA_MLOCK_ALL_MODE: "${RINHA_MLOCK_ALL_MODE:-future}"
+      RINHA_THREAD_POOL_SIZE: "256"
+      RINHA_MLOCK_ALL: "1"
+      RINHA_MLOCK_INDEX: "1"
+      RINHA_MLOCK_ALL_MODE: future
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     ulimits:
@@ -54,11 +57,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.48"
-          memory: "170M"
+          cpus: "0.45"
+          memory: "167M"
 
   lb:
-    image: ${LB_IMAGE:-ghcr.io/fksegundo/rinha-api-lb:latest}
+    image: ghcr.io/fksegundo/rinha-dotnet-lb:latest
     pull_policy: always
     restart: always
     user: "0:0"
@@ -71,8 +74,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.16"
-          memory: "6M"
+          cpus: "0.10"
+          memory: "16M"
     depends_on:
       - api1
       - api2
@@ -83,4 +86,4 @@ volumes:
     driver_opts:
       type: tmpfs
       device: tmpfs
-      o: size=4m
+      o: size=10m
