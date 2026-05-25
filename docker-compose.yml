@@ -9,9 +9,9 @@ services:
       RINHA_FD_SOCKET: /sockets/api1.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
       RINHA_RUNTIME: event-loop
-      RINHA_WARMUP_QUERIES: "4096"
+      RINHA_WARMUP_QUERIES: "12288"
       RINHA_SEARCH_MODE: key-first
-      RINHA_THREAD_POOL_SIZE: "256"
+      RINHA_THREAD_POOL_SIZE: "128"
       #RINHA_MLOCK_ALL: "1"
       #RINHA_MLOCK_INDEX: "1"
       #RINHA_MLOCK_ALL_MODE: future
@@ -26,8 +26,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.45"
-          memory: "167M"
+          cpus: "0.47"
+          memory: "170M"
 
   api2:
     image: ghcr.io/fksegundo/rinha-dotnet:latest
@@ -40,9 +40,9 @@ services:
       RINHA_FD_SOCKET: /sockets/api2.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
       RINHA_RUNTIME: event-loop
-      RINHA_WARMUP_QUERIES: "4096"
+      RINHA_WARMUP_QUERIES: "12288"
       RINHA_SEARCH_MODE: key-first
-      RINHA_THREAD_POOL_SIZE: "256"
+      RINHA_THREAD_POOL_SIZE: "128"
       #RINHA_MLOCK_ALL: "1"
       #RINHA_MLOCK_INDEX: "1"
       #RINHA_MLOCK_ALL_MODE: future
@@ -57,8 +57,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.45"
-          memory: "167M"
+          cpus: "0.47"
+          memory: "170M"
 
   lb:
     image: ghcr.io/fksegundo/rinha-dotnet-lb:latest
@@ -74,8 +74,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.10"
-          memory: "16M"
+          cpus: "0.06"
+          memory: "10M"
     depends_on:
       - api1
       - api2
