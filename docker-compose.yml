@@ -9,12 +9,12 @@ services:
       RINHA_FD_SOCKET: /sockets/api1.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
       RINHA_RUNTIME: event-loop
-      RINHA_WARMUP_QUERIES: "64"
+      RINHA_WARMUP_QUERIES: "4096"
       RINHA_SEARCH_MODE: key-first
       RINHA_THREAD_POOL_SIZE: "256"
-      RINHA_MLOCK_ALL: "1"
-      RINHA_MLOCK_INDEX: "1"
-      RINHA_MLOCK_ALL_MODE: future
+      #RINHA_MLOCK_ALL: "1"
+      #RINHA_MLOCK_INDEX: "1"
+      #RINHA_MLOCK_ALL_MODE: future
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     ulimits:
@@ -40,12 +40,12 @@ services:
       RINHA_FD_SOCKET: /sockets/api2.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
       RINHA_RUNTIME: event-loop
-      RINHA_WARMUP_QUERIES: "64"
+      RINHA_WARMUP_QUERIES: "4096"
       RINHA_SEARCH_MODE: key-first
       RINHA_THREAD_POOL_SIZE: "256"
-      RINHA_MLOCK_ALL: "1"
-      RINHA_MLOCK_INDEX: "1"
-      RINHA_MLOCK_ALL_MODE: future
+      #RINHA_MLOCK_ALL: "1"
+      #RINHA_MLOCK_INDEX: "1"
+      #RINHA_MLOCK_ALL_MODE: future
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     ulimits:
