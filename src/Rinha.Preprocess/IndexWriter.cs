@@ -9,7 +9,7 @@ public class IndexWriter
 
     public void WriteHeader(int referenceCount, ReadOnlySpan<short> cuts)
     {
-        _buf.AddRange("RNSPCST2"u8.ToArray());
+        _buf.AddRange("RNSPCST3"u8.ToArray());
         WriteI32(Constants.Scale);
         WriteI32(Constants.PackedDim);
         WriteI32(referenceCount);

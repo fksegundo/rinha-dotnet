@@ -2,7 +2,7 @@ namespace Rinha.Api.Index;
 
 public static class IndexFormat
 {
-    public const string Magic = "RNSPCST2";
+    public const string Magic = "RNSPCST3";
     public const int PackedDims = 16;
     public const int Dims = 14;
     public const int K = 5;
