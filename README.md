@@ -160,13 +160,6 @@ resources/
 - **Body:** `ArrayPool` + `ReadExactlyAsync` (no per-request allocation)
 - **Readiness:** async warmup; wait for `GET /ready` before load tests
 
-## Git hooks
-
-This repo rejects `Co-authored-by` commit trailers. Enable the local hook once:
-
-```bash
-git config core.hooksPath .githooks
-```
 
 ## License
 
