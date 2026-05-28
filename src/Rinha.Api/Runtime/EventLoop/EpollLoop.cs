@@ -23,6 +23,7 @@ public static unsafe class EpollLoop
         var acceptBudget = GetEnvInt("RINHA_ACCEPT_BUDGET", 0);
         var clientFdPreconfigured = RinhaOptions.ClientFdPreconfigured;
         var useEdgeTriggered = GetEnvBool("RINHA_EPOLL_EDGE", true);
+        var heartbeatMs = GetEnvInt("RINHA_EPOLL_HEARTBEAT_MS", 0);
 
         Console.WriteLine($"[EpollLoop] Starting on {socketPath} (timeout={epollTimeoutMs}ms, edge={useEdgeTriggered}, recv_budget={recvFdBudget})...");
 
@@ -72,7 +73,7 @@ public static unsafe class EpollLoop
         AcceptControl(listenerFd, epollFd, 1, ref controlFd, useEdgeTriggered);
         var events = stackalloc Syscalls.EpollEvent[MaxEvents];
         long totalReqs = 0;
-        long heartbeatAt = Environment.TickCount64 + 10000;
+        long heartbeatAt = heartbeatMs > 0 ? Environment.TickCount64 + heartbeatMs : long.MaxValue;
 
         Console.WriteLine("[EpollLoop] Single-threaded event loop running...");
 
@@ -93,7 +94,7 @@ public static unsafe class EpollLoop
                 var now = Environment.TickCount64;
                 if (now >= heartbeatAt)
                 {
-                    heartbeatAt = now + 10000;
+                    heartbeatAt = now + heartbeatMs;
                     var active = 0;
                     for (int i = 0; i < MaxClientFd; i++)
                         if (slots[i].Fd != -1) active++;
