@@ -1,10 +1,8 @@
 using System.Buffers.Binary;
-using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
-using Microsoft.Win32.SafeHandles;
 
 using Rinha.Api.Options;
 using Rinha.Api.Runtime;
@@ -13,10 +11,13 @@ namespace Rinha.Api.Index;
 
 public sealed unsafe class SpecialistIndex : IDisposable
 {
-    private MemoryMappedFile? _mmf;
-    private MemoryMappedViewAccessor? _accessor;
-    private SafeMemoryMappedViewHandle? _handle;
+    private const int OpenReadOnly = 0;
+    private const int ProtRead = 0x1;
+    private const int MapPrivate = 0x02;
+    private const int MapPopulate = 0x8000;
+
     private byte* _ptr;
+    private nuint _mapLength;
     private int _referenceCount;
     private int _partitionCount;
     private int _nodeCount;
@@ -37,16 +38,28 @@ public sealed unsafe class SpecialistIndex : IDisposable
     public static SpecialistIndex Open(string path)
     {
         var index = new SpecialistIndex();
-        index.OpenInternal(path);
-        return index;
+        try
+        {
+            index.OpenInternal(path);
+            return index;
+        }
+        catch
+        {
+            index.Dispose();
+            throw;
+        }
     }
 
     private void OpenInternal(string path)
     {
-        _mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open);
-        _accessor = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-        _handle = _accessor.SafeMemoryMappedViewHandle;
-        _handle.AcquirePointer(ref _ptr);
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("SpecialistIndex uses mmap with MAP_POPULATE and requires Linux.");
+
+        _mapLength = checked((nuint)new FileInfo(path).Length);
+        if (_mapLength == 0)
+            throw new InvalidOperationException($"Index file is empty: {path}");
+
+        _ptr = (byte*)MapFileReadOnly(path, _mapLength);
 
         var magic = ReadString(_ptr, 0, 8);
         if (magic != IndexFormat.Magic)
@@ -79,7 +92,7 @@ public sealed unsafe class SpecialistIndex : IDisposable
 
         BuildPartitionLookup();
 
-        nint mapLen = (nint)_accessor!.Capacity;
+        nint mapLen = (nint)_mapLength;
         IndexMemory.AdviseWillNeed((IntPtr)_ptr, mapLen);
         IndexMemory.AdviseHugePage((IntPtr)_ptr, mapLen);
         IndexMemory.AdviseHugePage((IntPtr)_vectorsPtr, _blockCount * SearchConstants.Dims * SearchConstants.Lanes * 2);
@@ -115,17 +128,17 @@ public sealed unsafe class SpecialistIndex : IDisposable
 
     public void MlockMapping()
     {
-        if (_accessor is null || _ptr == null)
+        if (_ptr == null || _mapLength == 0)
             return;
 
-        MemoryLock.TryLockRegion((IntPtr)_ptr, (nuint)(ulong)_accessor.Capacity);
+        MemoryLock.TryLockRegion((IntPtr)_ptr, _mapLength);
     }
 
     public void PretouchMapping()
     {
-        if (_ptr == null || _accessor == null) return;
+        if (_ptr == null || _mapLength == 0) return;
 
-        long capacity = _accessor.Capacity;
+        long capacity = checked((long)_mapLength);
         long checksum = 0;
 
         // Port of pretouch_all: read every 4KiB
@@ -594,11 +607,51 @@ public sealed unsafe class SpecialistIndex : IDisposable
         return BinaryPrimitives.ReadInt16LittleEndian(new ReadOnlySpan<byte>(ptr + offset, 2));
     }
 
+    private static IntPtr MapFileReadOnly(string path, nuint length)
+    {
+        int fd = open(path, OpenReadOnly);
+        if (fd < 0)
+            ThrowErrno($"open failed for {path}");
+
+        try
+        {
+            IntPtr ptr = mmap(IntPtr.Zero, (UIntPtr)length, ProtRead, MapPrivate | MapPopulate, fd, 0);
+            if (ptr == new IntPtr(-1))
+                ThrowErrno($"mmap failed for {path}");
+
+            return ptr;
+        }
+        finally
+        {
+            close(fd);
+        }
+    }
+
+    private static void ThrowErrno(string message)
+    {
+        int errno = Marshal.GetLastPInvokeError();
+        throw new IOException($"{message}: errno {errno}");
+    }
+
     public void Dispose()
     {
-        if (_handle is not null)
-            _handle.ReleasePointer();
-        _accessor?.Dispose();
-        _mmf?.Dispose();
+        if (_ptr != null && _mapLength != 0)
+        {
+            munmap((IntPtr)_ptr, (UIntPtr)_mapLength);
+            _ptr = null;
+            _mapLength = 0;
+        }
     }
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int open(string pathname, int flags);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern IntPtr mmap(IntPtr addr, UIntPtr length, int prot, int flags, int fd, nint offset);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int munmap(IntPtr addr, UIntPtr length);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int close(int fd);
 }
