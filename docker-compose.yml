@@ -2,19 +2,18 @@ services:
   api1:
     image: ghcr.io/fksegundo/rinha-dotnet:latest
     pull_policy: always
+    cpuset: "0"
     restart: always
     logging:
       driver: "none"
     environment:
+      RINHA_RUNTIME: "event-loop"
       RINHA_FD_SOCKET: /sockets/api1.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_RUNTIME: event-loop
-      RINHA_WARMUP_QUERIES: "12288"
-      RINHA_SEARCH_MODE: key-first
-      RINHA_THREAD_POOL_SIZE: "48"
-      #RINHA_MLOCK_ALL: "1"
-      #RINHA_MLOCK_INDEX: "1"
-      #RINHA_MLOCK_ALL_MODE: future
+      RINHA_PRETOUCH_INDEX: "0"
+      RINHA_MLOCK_INDEX: "1"
+      RINHA_CLIENT_FD_PRECONFIGURED: "1"
+      RINHA_THREAD_POOL_SIZE: "1"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     ulimits:
@@ -26,26 +25,25 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.47"
+          cpus: "0.45"
           memory: "170M"
 
   api2:
     image: ghcr.io/fksegundo/rinha-dotnet:latest
     pull_policy: always
+    cpuset: "1"
     restart: always
     network_mode: "none"
     logging:
       driver: "none"
     environment:
-      RINHA_FD_SOCKET: /sockets/api2.sock
+      RINHA_RUNTIME: "event-loop"
+      RINHA_FD_SOCKET: /sockets/api1.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_RUNTIME: event-loop
-      RINHA_WARMUP_QUERIES: "12288"
-      RINHA_SEARCH_MODE: key-first
-      RINHA_THREAD_POOL_SIZE: "48"
-      #RINHA_MLOCK_ALL: "1"
-      #RINHA_MLOCK_INDEX: "1"
-      #RINHA_MLOCK_ALL_MODE: future
+      RINHA_PRETOUCH_INDEX: "0"
+      RINHA_MLOCK_INDEX: "1"
+      RINHA_CLIENT_FD_PRECONFIGURED: "1"
+      RINHA_THREAD_POOL_SIZE: "1"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     ulimits:
@@ -57,12 +55,13 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.47"
+          cpus: "0.45"
           memory: "170M"
 
   lb:
     image: ghcr.io/fksegundo/rinha-api-lb:sha-ee837aa
     pull_policy: always
+    cpuset: "2,3"
     restart: always
     user: "0:0"
     ports:
@@ -74,8 +73,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.06"
-          memory: "10M"
+          cpus: "0.1"
+          memory: "6M"
     depends_on:
       - api1
       - api2
