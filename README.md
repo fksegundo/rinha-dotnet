@@ -12,32 +12,32 @@
 
 ## Overview
 
-The API accepts transactions on `POST /fraud-score`, extracts a 14-dimensional vector, queries a pre-built **RNSPCST1** index (3M references), and returns a fraud score and approval flag. The production binary is **Native AOT** for `linux-x64` with no managed runtime.
+The API accepts transactions on `POST /fraud-score`, extracts a 14-dimensional vector, queries a pre-built **RNSPCST2** index (3M references), and returns a fraud score and approval flag. The production binary is **Native AOT** for `linux-x64` with no managed runtime.
 
 ```
-Client → Rust LB :9999 → api1 / api2 (SCM_RIGHTS FD passing)
-                              ↓
-                         mmap index + AVX2 search
+Client → Evented Rust LB :9999 → api1 / api2 (SCM_RIGHTS FD passing)
+                                    ↓
+                       mlock + pretouch + AVX2 search
 ```
 
 | Component | Role |
 | --- | --- |
 | `Rinha.Api` | HTTP API (`/ready`, `/fraud-score`) |
-| `Rinha.Preprocess` | Builds the index from `references.json.gz` |
+| `Rinha.Preprocess` | Builds the index with **v0-cuts** header |
 | `Rinha.Verify` | CLI to validate responses against a test dataset |
-| Rust LB | Load balancer on port **9999** (`ghcr.io/fksegundo/rinha-api-lb`) |
-| 2× API | Replicas within challenge CPU/RAM limits |
+| Rust LB | **Evented** Load balancer on port **9999** (`rinha-dotnet-lb:local`) |
+| 2× API | Replicas with `cpuset` and `mlock` enabled |
 
 ## Benchmark tuning
 
-Production settings were chosen from local benchmark matrices (score **6000**, **0 FP/FN**):
+Production settings were chosen for parity with `rinha-rust`:
 
 | Document | Scope |
 | --- | --- |
 | [docs/benchmark-matrix.md](docs/benchmark-matrix.md) | API tuning — warmup, thread pool, leaf size |
-| [docs/proxy-benchmark-matrix.md](docs/proxy-benchmark-matrix.md) | Historical load balancer tuning — HAProxy/nginx comparison |
+| [docs/perf-rework.md](docs/perf-rework.md) | Details on the 2026 performance rework |
 
-Recommended stack config: `RINHA_WARMUP_QUERIES=64`, `DOTNET_ThreadPool_MinThreads=16`, `RINHA_LEAF_SIZE=48`, Rust LB with FD passing.
+Recommended stack config: `RINHA_PRETOUCH_INDEX=1`, `RINHA_MLOCK_INDEX=1`, `cpuset` pinning, evented LB.
 
 ## Endpoints
 
@@ -126,11 +126,9 @@ dotnet run --project src/Rinha.Verify -c Release -- \
 | `RINHA_UDS_SOCKET` | — | Kestrel UDS path for local dev without the Rust LB |
 | `RINHA_INDEX_PATH` | `/app/index/rinha-specialist.idx` | Index file path |
 | `RINHA_WARMUP_QUERIES` | `64` | Warmup queries before `/ready` |
-| `RINHA_SEARCH_MODE` | `key-first` | Index search strategy |
-| `RINHA_MAX_BODY_BYTES` | `8192` | Maximum request body size |
-| `DOTNET_gcServer` | `0` | Workstation GC (better in small containers) |
-| `DOTNET_ThreadPool_MinThreads` | `16` | Thread pool minimum threads |
-| `MALLOC_ARENA_MAX` | `2` | Limits native memory arena fragmentation |
+| `RINHA_PRETOUCH_INDEX` | `1` | Eagerly fault-in index mapping at startup |
+| `RINHA_MLOCK_INDEX` | `1` | Locks index pages in RAM (requires memlock ulimit) |
+| `RINHA_SEARCH_MODE` | `key-first` | Index search strategy (key-first uses active keys) |
 
 ## Repository layout
 

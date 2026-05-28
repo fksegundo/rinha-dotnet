@@ -4,25 +4,23 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      args:
-        RINHA_LEAF_SIZE: ${RINHA_LEAF_SIZE:-48}
     pull_policy: never
     restart: always
-    logging:
-      driver: "none"
     environment:
+      RINHA_RUNTIME: "event-loop"
       RINHA_FD_SOCKET: /sockets/api1.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_RUNTIME: "${RINHA_RUNTIME:-event-loop}"
-      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-64}"
-      RINHA_SEARCH_MODE: key-first
-      RINHA_THREAD_POOL_SIZE: "${RINHA_THREAD_POOL_SIZE:-256}"
-      RINHA_MLOCK_ALL: "${RINHA_MLOCK_ALL:-1}"
-      RINHA_MLOCK_INDEX: "${RINHA_MLOCK_INDEX:-1}"
-      RINHA_MLOCK_ALL_MODE: "${RINHA_MLOCK_ALL_MODE:-future}"
+      RINHA_PRETOUCH_INDEX: "1"
+      RINHA_MLOCK_INDEX: "1"
+      RINHA_CLIENT_FD_PRECONFIGURED: "1"
+      RINHA_THREAD_POOL_SIZE: "1"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
+    cpuset: "0"
     ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
       memlock:
         soft: -1
         hard: -1
@@ -32,33 +30,31 @@ services:
       resources:
         limits:
           cpus: "0.45"
-          memory: "167M"
+          memory: "170M"
 
   api2:
     image: rinha-dotnet-aot-api:local
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      args:
-        RINHA_LEAF_SIZE: ${RINHA_LEAF_SIZE:-48}
     pull_policy: never
     restart: always
     network_mode: "none"
-    logging:
-      driver: "none"
     environment:
+      RINHA_RUNTIME: "event-loop"
       RINHA_FD_SOCKET: /sockets/api2.sock
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
-      RINHA_RUNTIME: "${RINHA_RUNTIME:-event-loop}"
-      RINHA_WARMUP_QUERIES: "${RINHA_WARMUP_QUERIES:-64}"
-      RINHA_SEARCH_MODE: key-first
-      RINHA_THREAD_POOL_SIZE: "${RINHA_THREAD_POOL_SIZE:-256}"
-      RINHA_MLOCK_ALL: "${RINHA_MLOCK_ALL:-1}"
-      RINHA_MLOCK_INDEX: "${RINHA_MLOCK_INDEX:-1}"
-      RINHA_MLOCK_ALL_MODE: "${RINHA_MLOCK_ALL_MODE:-future}"
+      RINHA_PRETOUCH_INDEX: "1"
+      RINHA_MLOCK_INDEX: "1"
+      RINHA_CLIENT_FD_PRECONFIGURED: "1"
+      RINHA_THREAD_POOL_SIZE: "1"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
+    cpuset: "1"
     ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
       memlock:
         soft: -1
         hard: -1
@@ -68,7 +64,7 @@ services:
       resources:
         limits:
           cpus: "0.45"
-          memory: "167M"
+          memory: "170M"
 
   lb:
     image: rinha-dotnet-lb:local
@@ -80,15 +76,18 @@ services:
     user: "0:0"
     ports:
       - "9999:9999"
-    logging:
-      driver: "none"
+    cpuset: "2,3"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     volumes:
       - sockets:/sockets
     deploy:
       resources:
         limits:
-          cpus: "${LB_CPUS:-0.10}"
-          memory: "16M"
+          cpus: "0.10"
+          memory: "10M"
     depends_on:
       - api1
       - api2

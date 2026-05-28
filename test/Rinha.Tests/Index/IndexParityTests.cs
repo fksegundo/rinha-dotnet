@@ -10,19 +10,19 @@ public class IndexParityTests
     {
         var references = new List<Reference>
         {
-            MakeRef([1000, 0, 0, 0, 0, -10000, -10000, 0, 0, 0, 0, 0, 0, 0], 0),
-            MakeRef([2000, 0, 0, 0, 0, -10000, -10000, 0, 0, 0, 0, 0, 0, 0], 0),
-            MakeRef([3000, 0, 0, 0, 0, -10000, -10000, 0, 0, 0, 0, 0, 0, 0], 0),
-            MakeRef([4000, 0, 0, 0, 0, -10000, -10000, 0, 0, 0, 0, 0, 0, 0], 0),
-            MakeRef([5000, 0, 0, 0, 0, -10000, -10000, 0, 0, 0, 0, 0, 0, 0], 0),
-            MakeRef([9000, 0, 0, 0, 0, -10000, -10000, 0, 0, 0, 0, 0, 0, 0], 1),
-            MakeRef([10000, 0, 0, 0, 0, -10000, -10000, 0, 0, 0, 0, 0, 0, 0], 1),
-            MakeRef([11000, 0, 0, 0, 0, -10000, -10000, 0, 0, 0, 0, 0, 0, 0], 1),
-            MakeRef([12000, 0, 0, 0, 0, -10000, -10000, 0, 0, 0, 0, 0, 0, 0], 1),
-            MakeRef([13000, 0, 0, 0, 0, -10000, -10000, 0, 0, 0, 0, 0, 0, 0], 1),
+            MakeRef([1000, 0, 4000, 0, 0, 0, 0, 0, 2000, 1, 1, 1, 0, 0], 0),
+            MakeRef([2000, 0, 4000, 0, 0, 0, 0, 0, 2000, 1, 1, 1, 0, 0], 0),
+            MakeRef([3000, 0, 5000, 0, 0, 0, 0, 0, 3000, 1, 1, 1, 0, 0], 0),
+            MakeRef([4000, 0, 5000, 0, 0, 0, 0, 0, 3000, 1, 1, 1, 0, 0], 0),
+            MakeRef([5000, 0, 5000, 0, 0, 0, 0, 0, 3000, 0, 0, 0, 0, 0], 0),
+            MakeRef([9000, 0, 5000, 0, 0, 0, 0, 0, 3000, 0, 0, 0, 0, 0], 1),
+            MakeRef([10000, 0, 5000, 0, 0, 0, 0, 0, 3000, 0, 0, 0, 0, 0], 1),
+            MakeRef([11000, 0, 5000, 0, 0, 0, 0, 0, 3000, 0, 0, 0, 0, 0], 1),
+            MakeRef([12000, 0, 5000, 0, 0, 0, 0, 0, 3000, 0, 0, 0, 0, 0], 1),
+            MakeRef([13000, 0, 5000, 0, 0, 0, 0, 0, 3000, 0, 0, 0, 0, 0], 1),
         };
 
-        var bytes = new IndexBuilder().BuildIndex(references, 48, 128);
+        var bytes = new IndexBuilder().BuildIndex(references, 8, 128);
         var path = Path.Combine(Path.GetTempPath(), $"rinha-test-{Guid.NewGuid():N}.idx");
         File.WriteAllBytes(path, bytes);
 
@@ -33,6 +33,11 @@ public class IndexParityTests
 
             Span<short> query = stackalloc short[16];
             query[0] = 1050;
+            query[2] = 4000;
+            query[8] = 2000;
+            query[9] = 1;
+            query[10] = 1;
+            query[11] = 1;
 
             byte tree = index.PredictFraudCount(query);
             byte linear = index.PredictFraudCountExact(query);

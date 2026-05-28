@@ -16,6 +16,8 @@ internal sealed class ConnectionTable
     private readonly int[] _freeSlots = new int[MaxConnections];
     private int _freeCount;
 
+    public int ActiveCount => MaxConnections - _freeCount;
+
     public ConnectionTable()
     {
         for (int i = 0; i < MaxConnections; i++)

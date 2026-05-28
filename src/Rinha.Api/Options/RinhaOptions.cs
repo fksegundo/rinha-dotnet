@@ -35,6 +35,12 @@ public static class RinhaOptions
     public static bool MlockIndex =>
         Environment.GetEnvironmentVariable("RINHA_MLOCK_INDEX") == "1";
 
+    public static bool PretouchIndex =>
+        Environment.GetEnvironmentVariable("RINHA_PRETOUCH_INDEX") == "1";
+
+    public static bool ClientFdPreconfigured =>
+        Environment.GetEnvironmentVariable("RINHA_CLIENT_FD_PRECONFIGURED") == "1";
+
     public static string MlockAllMode =>
         Environment.GetEnvironmentVariable("RINHA_MLOCK_ALL_MODE") ?? "future";
 
@@ -58,6 +64,9 @@ public static class RinhaOptions
         }
     }
 
+    public static bool FdEvented =>
+        Environment.GetEnvironmentVariable("RINHA_FD_EVENTED") is { } v && v != "0";
+
     public static bool UseEventLoop =>
-        UseFdPassing && RuntimeMode.Equals("event-loop", StringComparison.OrdinalIgnoreCase);
+        UseFdPassing && (FdEvented || RuntimeMode.Equals("event-loop", StringComparison.OrdinalIgnoreCase));
 }

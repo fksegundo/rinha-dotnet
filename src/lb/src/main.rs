@@ -8,10 +8,51 @@ const PORT: u16 = 9999;
 const UPSTREAMS: [&str; 2] = ["/sockets/api1.sock", "/sockets/api2.sock"];
 const BACKLOG: i32 = 65_535;
 const MAX_EVENTS: i32 = 256;
-const TCP_DEFER_ACCEPT: i32 = 9;
+const ACCEPT_BATCH_LIMIT: u32 = 64;
 const WARMUP_ATTEMPTS: u32 = 300;
-const WARMUP_INTERVAL: Duration = Duration::from_millis(100);
+const WARMUP_INTERVAL: Duration = Duration::from_millis(10);
 const RESPONSE_NOT_READY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
+const CONTROL_SNDBUF: i32 = 256 * 1024;
+
+struct ControlChannel {
+    stream: UnixStream,
+    byte: u8,
+    control: [u8; 64],
+    cmsg_len: usize,
+}
+
+impl ControlChannel {
+    fn send_fd(&mut self, fd_to_send: RawFd) -> io::Result<()> {
+        let mut iov = libc::iovec {
+            iov_base: (&mut self.byte as *mut u8).cast(),
+            iov_len: 1,
+        };
+        unsafe {
+            let data = self
+                .control
+                .as_mut_ptr()
+                .add(std::mem::size_of::<libc::cmsghdr>())
+                .cast::<RawFd>();
+            *data = fd_to_send;
+
+            let msg = libc::msghdr {
+                msg_name: std::ptr::null_mut(),
+                msg_namelen: 0,
+                msg_iov: &mut iov,
+                msg_iovlen: 1,
+                msg_control: self.control.as_mut_ptr().cast(),
+                msg_controllen: self.cmsg_len,
+                msg_flags: 0,
+            };
+
+            let sent = libc::sendmsg(self.stream.as_raw_fd(), &msg, libc::MSG_NOSIGNAL);
+            if sent != 1 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(())
+    }
+}
 
 fn main() {
     ignore_sigpipe();
@@ -20,7 +61,7 @@ fn main() {
     let listener_fd = listener.as_raw_fd();
     set_nonblocking(listener_fd).expect("failed to set listener non-blocking");
 
-    let mut controls: [Option<UnixStream>; 2] = [None, None];
+    let mut controls: [Option<ControlChannel>; 2] = [None, None];
     warmup_controls(&mut controls);
 
     let epoll_fd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
@@ -38,9 +79,12 @@ fn main() {
     }
 
     let mut upstream_idx = 0usize;
+    let mut reconnect_needed = [false; 2];
     let mut events = [libc::epoll_event { events: 0, u64: 0 }; MAX_EVENTS as usize];
 
     loop {
+        reconnect_controls(&mut controls, &mut reconnect_needed);
+
         let ready = unsafe { libc::epoll_wait(epoll_fd, events.as_mut_ptr(), MAX_EVENTS, -1) };
         if ready < 0 {
             let err = io::Error::last_os_error();
@@ -56,19 +100,29 @@ fn main() {
                 continue;
             }
 
-            accept_burst(listener_fd, &mut upstream_idx, &mut controls);
+            accept_burst(
+                listener_fd,
+                &mut upstream_idx,
+                &mut controls,
+                &mut reconnect_needed,
+            );
         }
     }
 }
 
-fn accept_burst(listener_fd: RawFd, upstream_idx: &mut usize, controls: &mut [Option<UnixStream>; 2]) {
-    loop {
+fn accept_burst(
+    listener_fd: RawFd,
+    upstream_idx: &mut usize,
+    controls: &mut [Option<ControlChannel>; 2],
+    reconnect_needed: &mut [bool; 2],
+) {
+    for _ in 0..ACCEPT_BATCH_LIMIT {
         let client_fd = unsafe {
             libc::accept4(
                 listener_fd,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                libc::SOCK_CLOEXEC,
+                libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
             )
         };
 
@@ -86,7 +140,7 @@ fn accept_burst(listener_fd: RawFd, upstream_idx: &mut usize, controls: &mut [Op
 
         configure_tcp(client_fd);
 
-        if !handoff(client_fd, *upstream_idx, controls) {
+        if !handoff(client_fd, *upstream_idx, controls, reconnect_needed) {
             let _ = unsafe {
                 libc::write(
                     client_fd,
@@ -104,49 +158,92 @@ fn accept_burst(listener_fd: RawFd, upstream_idx: &mut usize, controls: &mut [Op
     }
 }
 
-fn warmup_controls(controls: &mut [Option<UnixStream>; 2]) {
-    for (idx, path) in UPSTREAMS.iter().enumerate() {
-        for _ in 0..WARMUP_ATTEMPTS {
-            if let Some(stream) = connect_control(path) {
-                controls[idx] = Some(stream);
-                break;
-            }
-            thread::sleep(WARMUP_INTERVAL);
+fn warmup_controls(controls: &mut [Option<ControlChannel>; 2]) {
+    let results = thread::scope(|scope| {
+        UPSTREAMS.map(|path| {
+            scope
+                .spawn(move || warmup_one(path))
+                .join()
+                .expect("warmup thread panicked")
+        })
+    });
+
+    for (idx, stream) in results.into_iter().enumerate() {
+        controls[idx] = stream;
+    }
+}
+
+fn warmup_one(path: &str) -> Option<ControlChannel> {
+    for _ in 0..WARMUP_ATTEMPTS {
+        if let Some(stream) = connect_control(path) {
+            return Some(stream);
+        }
+        thread::sleep(WARMUP_INTERVAL);
+    }
+    None
+}
+
+fn reconnect_controls(controls: &mut [Option<ControlChannel>; 2], reconnect_needed: &mut [bool; 2]) {
+    for idx in 0..UPSTREAMS.len() {
+        if !reconnect_needed[idx] || controls[idx].is_some() {
+            continue;
+        }
+
+        if let Some(stream) = connect_control(UPSTREAMS[idx]) {
+            controls[idx] = Some(stream);
+            reconnect_needed[idx] = false;
         }
     }
 }
 
-fn handoff(client_fd: RawFd, first_idx: usize, controls: &mut [Option<UnixStream>; 2]) -> bool {
-    if try_send(client_fd, first_idx, controls) {
-        return true;
-    }
-
-    controls[first_idx] = connect_control(UPSTREAMS[first_idx]);
-    if try_send(client_fd, first_idx, controls) {
+fn handoff(
+    client_fd: RawFd,
+    first_idx: usize,
+    controls: &mut [Option<ControlChannel>; 2],
+    reconnect_needed: &mut [bool; 2],
+) -> bool {
+    if try_send(client_fd, first_idx, controls, reconnect_needed) {
         return true;
     }
 
     let alt = first_idx ^ 1;
-    if try_send(client_fd, alt, controls) {
-        return true;
-    }
-
-    controls[alt] = connect_control(UPSTREAMS[alt]);
-    try_send(client_fd, alt, controls)
+    try_send(client_fd, alt, controls, reconnect_needed)
 }
 
-fn try_send(client_fd: RawFd, idx: usize, controls: &mut [Option<UnixStream>; 2]) -> bool {
-    let Some(control) = controls[idx].as_ref() else {
+fn try_send(
+    client_fd: RawFd,
+    idx: usize,
+    controls: &mut [Option<ControlChannel>; 2],
+    reconnect_needed: &mut [bool; 2],
+) -> bool {
+    let Some(control) = controls[idx].as_mut() else {
+        reconnect_needed[idx] = true;
         return false;
     };
 
-    match send_fd(control.as_raw_fd(), client_fd) {
-        Ok(()) => true,
-        Err(_) => {
-            controls[idx] = None;
-            false
+    const HANDOFF_RETRY: Duration = Duration::from_micros(200);
+
+    let start = std::time::Instant::now();
+    loop {
+        match control.send_fd(client_fd) {
+            Ok(()) => return true,
+            Err(err) if is_would_block(&err) => {
+                if start.elapsed() >= HANDOFF_RETRY {
+                    return false;
+                }
+                thread::yield_now();
+            }
+            Err(_) => {
+                controls[idx] = None;
+                reconnect_needed[idx] = true;
+                return false;
+            }
         }
     }
+}
+
+fn is_would_block(err: &io::Error) -> bool {
+    err.raw_os_error() == Some(libc::EAGAIN)
 }
 
 fn make_listener(port: u16) -> io::Result<std::net::TcpListener> {
@@ -158,7 +255,6 @@ fn make_listener(port: u16) -> io::Result<std::net::TcpListener> {
     let result = (|| {
         set_int_sockopt(fd, libc::SOL_SOCKET, libc::SO_REUSEADDR, 1)?;
         set_int_sockopt(fd, libc::SOL_SOCKET, libc::SO_REUSEPORT, 1)?;
-        set_int_sockopt(fd, libc::IPPROTO_TCP, TCP_DEFER_ACCEPT, 1)?;
 
         let addr = libc::sockaddr_in {
             sin_family: libc::AF_INET as u16,
@@ -231,49 +327,29 @@ fn configure_tcp(fd: RawFd) {
     let _ = set_int_sockopt(fd, libc::IPPROTO_TCP, libc::TCP_QUICKACK, 1);
 }
 
-fn connect_control(path: &str) -> Option<UnixStream> {
-    UnixStream::connect(path).ok()
-}
-
-fn send_fd(socket_fd: RawFd, fd_to_send: RawFd) -> io::Result<()> {
-    let mut byte = [0u8; 1];
-    let mut iov = libc::iovec {
-        iov_base: byte.as_mut_ptr().cast(),
-        iov_len: 1,
-    };
+fn connect_control(path: &str) -> Option<ControlChannel> {
+    let stream = UnixStream::connect(path).ok()?;
+    let fd = stream.as_raw_fd();
+    set_nonblocking(fd).ok()?;
+    let _ = set_int_sockopt(fd, libc::SOL_SOCKET, libc::SO_SNDBUF, CONTROL_SNDBUF);
 
     let mut control = [0u8; 64];
-    let hdr = control.as_mut_ptr().cast::<libc::cmsghdr>();
-
+    let cmsg_len;
     unsafe {
+        let hdr = control.as_mut_ptr().cast::<libc::cmsghdr>();
         (*hdr).cmsg_len =
             (std::mem::size_of::<libc::cmsghdr>() + std::mem::size_of::<RawFd>()) as _;
         (*hdr).cmsg_level = libc::SOL_SOCKET;
         (*hdr).cmsg_type = libc::SCM_RIGHTS;
-
-        let data = control
-            .as_mut_ptr()
-            .add(std::mem::size_of::<libc::cmsghdr>())
-            .cast::<RawFd>();
-        *data = fd_to_send;
-
-        let msg = libc::msghdr {
-            msg_name: std::ptr::null_mut(),
-            msg_namelen: 0,
-            msg_iov: &mut iov,
-            msg_iovlen: 1,
-            msg_control: control.as_mut_ptr().cast(),
-            msg_controllen: (*hdr).cmsg_len as _,
-            msg_flags: 0,
-        };
-
-        let sent = libc::sendmsg(socket_fd, &msg, libc::MSG_NOSIGNAL);
-        if sent != 1 {
-            return Err(io::Error::last_os_error());
-        }
+        cmsg_len = (*hdr).cmsg_len as usize;
     }
 
-    Ok(())
+    Some(ControlChannel {
+        stream,
+        byte: 0,
+        control,
+        cmsg_len,
+    })
 }
 
 fn ignore_sigpipe() {

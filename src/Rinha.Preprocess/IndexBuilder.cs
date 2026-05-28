@@ -7,14 +7,17 @@ public class IndexBuilder
 
     public byte[] BuildIndex(List<Reference> references, int leafSize, int _flatThreshold)
     {
-        leafSize = Math.Clamp(leafSize, 32, 2048);
+        leafSize = Math.Max(8, leafSize); // Match LANES=8 clamp from Rust
+        
+        var cuts = ComputeV0Cuts(references);
+        
         var writer = new IndexWriter();
-        writer.WriteHeader(references.Count);
+        writer.WriteHeader(references.Count, cuts);
 
         var partitions = new Dictionary<uint, List<int>>();
         for (int i = 0; i < references.Count; i++)
         {
-            uint key = PartitionKey.Compute(references[i].Vector);
+            uint key = PartitionKey.Compute(references[i].Vector, cuts);
             if (!partitions.TryGetValue(key, out var list))
             {
                 list = new List<int>();
@@ -80,6 +83,25 @@ public class IndexBuilder
         }
 
         return writer.IntoBytes();
+    }
+
+    private static short[] ComputeV0Cuts(List<Reference> references)
+    {
+        if (references.Count < 8)
+            return new short[7];
+
+        var values = references.Select(r => r.Vector[0]).ToArray();
+        Array.Sort(values);
+        
+        int n = values.Length;
+        var cuts = new short[7];
+        for (int i = 0; i < 7; i++)
+        {
+            int idx = ((i + 1) * n) / 8;
+            idx = Math.Min(idx, n - 1);
+            cuts[i] = values[idx];
+        }
+        return cuts;
     }
 
     private int BuildNode(List<Reference> references, List<int> indices, int leafSize)

@@ -27,6 +27,9 @@ public sealed unsafe class SpecialistIndex : IDisposable
     private PartitionRecord[] _partitions = [];
     private NodeRecord[] _nodes = [];
     private short[] _partitionByKey = [];
+    private uint[] _activeKeys = [];
+    private short[] _partitionCutsV0 = new short[7];
+    
     private bool _hasAvx2;
     private SearchMode _searchMode;
     private long _earlyExitThreshold;
@@ -62,7 +65,10 @@ public sealed unsafe class SpecialistIndex : IDisposable
         _nodeCount = ReadI32(_ptr, 24);
         _blockCount = ReadI32(_ptr, 28);
 
-        byte* partitionsPtr = _ptr + 32;
+        for (int i = 0; i < 7; i++)
+            _partitionCutsV0[i] = ReadI16(_ptr, 32 + i * 2);
+
+        byte* partitionsPtr = _ptr + 32 + 14;
         byte* nodesPtr = partitionsPtr + (_partitionCount * IndexFormat.RecordSize);
 
         int vectorsOffset = (int)(nodesPtr - _ptr) + (_nodeCount * IndexFormat.RecordSize);
@@ -107,12 +113,17 @@ public sealed unsafe class SpecialistIndex : IDisposable
         _partitionByKey = new short[IndexFormat.PartitionKeySlots];
         Array.Fill(_partitionByKey, (short)-1);
 
+        var active = new List<uint>();
         for (int i = 0; i < _partitionCount; i++)
         {
             uint key = (uint)_partitions[i].Key;
             if (key < IndexFormat.PartitionKeySlots)
+            {
                 _partitionByKey[key] = (short)i;
+                active.Add(key);
+            }
         }
+        _activeKeys = active.ToArray();
     }
 
     public void MlockMapping()
@@ -121,6 +132,28 @@ public sealed unsafe class SpecialistIndex : IDisposable
             return;
 
         MemoryLock.TryLockRegion((IntPtr)_ptr, (nuint)(ulong)_accessor.Capacity);
+    }
+
+    public void PretouchMapping()
+    {
+        if (_ptr == null || _accessor == null) return;
+        
+        long capacity = _accessor.Capacity;
+        long checksum = 0;
+        
+        // Port of pretouch_all: read every 4KiB
+        for (long i = 0; i < capacity; i += 4096)
+        {
+            checksum += _ptr[i];
+        }
+        
+        // Last byte
+        if (capacity > 0)
+        {
+            checksum += _ptr[capacity - 1];
+        }
+
+        Console.WriteLine($"[Index] Pretouch finished (checksum: {checksum:X})");
     }
 
     public byte PredictFraudCount(Span<short> query)
@@ -229,13 +262,18 @@ public sealed unsafe class SpecialistIndex : IDisposable
         Span<(long bound, int idx)> partitionEntries = stackalloc (long, int)[SearchConstants.MaxPartitions];
         int partitionLen = 0;
 
-        for (int idx = 0; idx < _partitionCount; idx++)
+        for (int i = 0; i < _activeKeys.Length; i++)
         {
+            uint key = _activeKeys[i];
+            int idx = _partitionByKey[key];
             if (idx == primaryIdx)
                 continue;
 
             long bound = LowerBoundBoxRecord(query, ref _partitions[idx]);
-            partitionEntries[partitionLen++] = (bound, idx);
+            if (bound < bestDists[SearchConstants.K - 1])
+            {
+                partitionEntries[partitionLen++] = (bound, idx);
+            }
         }
 
         SortPartitionEntries(partitionEntries, partitionLen);
@@ -532,36 +570,32 @@ public sealed unsafe class SpecialistIndex : IDisposable
         }
     }
 
-    public static uint ComputePartitionKey(Span<short> vector)
+    public uint ComputePartitionKey(Span<short> vector)
     {
         uint key = 0;
 
-        if (vector[5] >= 0)
-            key |= 1u << 0;
-
         if (vector[9] > 0)
-            key |= 1u << 1;
-
+            key |= 1u << 0;
         if (vector[10] > 0)
-            key |= 1u << 2;
-
+            key |= 1u << 1;
         if (vector[11] > 0)
-            key |= 1u << 3;
-
-        int mccBucket = vector[12] switch
-        {
-            <= 2047 => 0,
-            <= 4095 => 1,
-            <= 6143 => 2,
-            _ => 3
-        };
-        key |= (uint)(mccBucket << 4);
-
-        if (vector[2] > 4096)
-            key |= 1u << 6;
-
+            key |= 1u << 2;
         if (vector[8] > 2048)
-            key |= 1u << 7;
+            key |= 1u << 3;
+        if (vector[2] > 4096)
+            key |= 1u << 4;
+
+        uint bucket = 0;
+        short v0 = vector[0];
+        for (int i = 0; i < _partitionCutsV0.Length; i++)
+        {
+            if (v0 > _partitionCutsV0[i])
+                bucket++;
+            else
+                break;
+        }
+        
+        key |= bucket << 5;
 
         return key;
     }
@@ -574,6 +608,11 @@ public sealed unsafe class SpecialistIndex : IDisposable
     private static int ReadI32(byte* ptr, int offset)
     {
         return BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(ptr + offset, 4));
+    }
+
+    private static short ReadI16(byte* ptr, int offset)
+    {
+        return BinaryPrimitives.ReadInt16LittleEndian(new ReadOnlySpan<byte>(ptr + offset, 2));
     }
 
     public void Dispose()

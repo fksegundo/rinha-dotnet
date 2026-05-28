@@ -6,12 +6,15 @@ namespace Rinha.Api.Runtime.EventLoop;
 internal static unsafe class Syscalls
 {
     internal const int EpollIn = 1;
+    internal const int EpollOut = 4;
     internal const int EpollErr = 8;
     internal const int EpollHup = 16;
     internal const int EpollRdHup = 0x2000;
     internal const int EpollEt = unchecked((int)0x80000000);
+    internal const int EpollEtRaw = unchecked((int)0x80000000);
     internal const int EpollCtlAdd = 1;
     internal const int EpollCtlDel = 2;
+    internal const int EpollCtlMod = 3;
     internal const int EpollClOexec = 0x80000;
 
     internal const int SolSocket = 1;
@@ -29,12 +32,13 @@ internal static unsafe class Syscalls
     internal const int Eintr = 4;
     internal const int ResultEagain = -2;
     internal const int EfdClOexec = 0x80000;
+    internal const int Epiocsparams = 0x40087001;
     private const int FGetFl = 3;
     private const int FSetFl = 4;
     private const int SigPipe = 13;
     private const nint SigIgn = 1;
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
     internal struct EpollEvent
     {
         public uint Events;
@@ -78,6 +82,12 @@ internal static unsafe class Syscalls
     public static nint Recv(int fd, byte* buf, int len, int flags = 0) =>
         recv(fd, buf, (nuint)len, flags);
 
+    public static nint Recv(int fd, byte[] buf, int offset, int len)
+    {
+        fixed (byte* p = buf)
+            return recv(fd, p + offset, (nuint)len, MsgDontWait);
+    }
+
     public static nint Send(int fd, byte* buf, int len, int flags = MsgNoSignal) =>
         send(fd, buf, (nuint)len, flags);
 
@@ -109,6 +119,15 @@ internal static unsafe class Syscalls
             return false;
 
         return fcntl_setfl(fd, FSetFl, flags | SockNonBlock) >= 0;
+    }
+
+    public static bool SetBlocking(int fd)
+    {
+        int flags = fcntl_getfl(fd, FGetFl);
+        if (flags < 0)
+            return false;
+
+        return fcntl_setfl(fd, FSetFl, flags & ~SockNonBlock) >= 0;
     }
 
     public static void SetQuickAck(int fd) =>
@@ -293,4 +312,46 @@ internal static unsafe class Syscalls
 
     [DllImport("libc", SetLastError = true)]
     private static extern nint write(int fd, void* buf, nuint count);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int ioctl(int fd, ulong request, void* arg);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct EpollParams
+    {
+        public uint BusyPollUsecs;
+        public ushort BusyPollBudget;
+        public byte PreferBusyPoll;
+        public byte Pad;
+    }
+
+    public static void ConfigureEpollBusyPoll(int epollFd)
+    {
+        var busyPollUs = GetEnvInt("RINHA_BUSY_POLL_US", 0);
+        if (busyPollUs == 0)
+            return;
+
+        var budget = (ushort)GetEnvInt("RINHA_BUSY_POLL_BUDGET", 8);
+        var prefer = (byte)GetEnvInt("RINHA_PREFER_BUSY_POLL", 1);
+
+        var ep = new EpollParams
+        {
+            BusyPollUsecs = (uint)busyPollUs,
+            BusyPollBudget = budget,
+            PreferBusyPoll = prefer,
+            Pad = 0
+        };
+
+        int rc = ioctl(epollFd, Epiocsparams, &ep);
+        if (rc < 0)
+        {
+            Console.WriteLine($"[Syscalls] EPIOCSPARAMS failed (busy_poll_us={busyPollUs}): {Marshal.GetLastPInvokeError()}");
+        }
+    }
+
+    private static int GetEnvInt(string name, int defaultValue)
+    {
+        var val = Environment.GetEnvironmentVariable(name);
+        return val != null && int.TryParse(val, out var n) ? n : defaultValue;
+    }
 }

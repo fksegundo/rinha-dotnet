@@ -7,15 +7,18 @@ public class IndexWriter
 {
     private readonly List<byte> _buf = new();
 
-    public void WriteHeader(int referenceCount)
+    public void WriteHeader(int referenceCount, ReadOnlySpan<short> cuts)
     {
-        _buf.AddRange("RNSPCST1"u8.ToArray());
+        _buf.AddRange("RNSPCST2"u8.ToArray());
         WriteI32(Constants.Scale);
         WriteI32(Constants.PackedDim);
         WriteI32(referenceCount);
-        WriteI32(0);
-        WriteI32(0);
-        WriteI32(0);
+        WriteI32(0); // partition count placeholder
+        WriteI32(0); // node count placeholder
+        WriteI32(0); // block count placeholder
+        
+        foreach (var cut in cuts)
+            WriteI16(cut);
     }
 
     public void WritePartitionCount(int count)
