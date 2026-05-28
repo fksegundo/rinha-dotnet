@@ -50,12 +50,12 @@ public static class FdSocketServer
 
                 EventLoop.Syscalls.SetBlocking(fd);
                 var client = new Socket(new SafeSocketHandle((IntPtr)fd, ownsHandle: true));
-                
+
                 if (!RinhaOptions.ClientFdPreconfigured)
                 {
                     SocketTuning.ConfigureClient(client);
                 }
-                
+
                 pool.Enqueue(client, state);
             }
         }

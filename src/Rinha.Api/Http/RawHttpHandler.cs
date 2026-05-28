@@ -43,16 +43,16 @@ public static class RawHttpHandler
                     switch (RawHttpParser.TryParse(slice, out var request, out int consumed, out ReadOnlyMemory<byte> reject))
                     {
                         case RawHttpParseResult.Complete:
-                        {
-                            ReadOnlyMemory<byte> response = BuildResponse(request, state);
-                            bool keepAlive = request.KeepAlive;
-                            processed += consumed;
-                            if (!TrySendAll(socket, response))
-                                return;
-                            if (!keepAlive)
-                                return;
-                            break;
-                        }
+                            {
+                                ReadOnlyMemory<byte> response = BuildResponse(request, state);
+                                bool keepAlive = request.KeepAlive;
+                                processed += consumed;
+                                if (!TrySendAll(socket, response))
+                                    return;
+                                if (!keepAlive)
+                                    return;
+                                break;
+                            }
 
                         case RawHttpParseResult.Reject:
                             if (!TrySendAll(socket, reject))
@@ -110,16 +110,16 @@ public static class RawHttpHandler
                     switch (RawHttpParser.TryParse(buffer.AsSpan(processed, used - processed), out var request, out int consumed, out ReadOnlyMemory<byte> reject))
                     {
                         case RawHttpParseResult.Complete:
-                        {
-                            ReadOnlyMemory<byte> response = BuildResponse(request, state);
-                            bool keepAlive = request.KeepAlive;
-                            processed += consumed;
-                            if (!await TrySendAllAsync(socket, response))
-                                return;
-                            if (!keepAlive)
-                                return;
-                            break;
-                        }
+                            {
+                                ReadOnlyMemory<byte> response = BuildResponse(request, state);
+                                bool keepAlive = request.KeepAlive;
+                                processed += consumed;
+                                if (!await TrySendAllAsync(socket, response))
+                                    return;
+                                if (!keepAlive)
+                                    return;
+                                break;
+                            }
 
                         case RawHttpParseResult.Reject:
                             if (!await TrySendAllAsync(socket, reject))
@@ -302,16 +302,11 @@ internal static class RawHttpParser
 
     private static bool TryFindHeaderEnd(ReadOnlySpan<byte> buffer, out int headerEnd)
     {
-        for (int i = 3; i < buffer.Length; i++)
+        int idx = buffer.IndexOf("\r\n\r\n"u8);
+        if (idx >= 0)
         {
-            if (buffer[i] == (byte)'\n'
-                && buffer[i - 1] == (byte)'\r'
-                && buffer[i - 2] == (byte)'\n'
-                && buffer[i - 3] == (byte)'\r')
-            {
-                headerEnd = i + 1;
-                return true;
-            }
+            headerEnd = idx + 4;
+            return true;
         }
 
         headerEnd = 0;
@@ -400,6 +395,9 @@ internal static class RawHttpParser
 
     private static bool ContainsConnectionClose(ReadOnlySpan<byte> headers)
     {
+        if (headers.IndexOf("Connection: close"u8) >= 0)
+            return true;
+
         for (int i = 0; i + 17 <= headers.Length; i++)
         {
             if (EqualsAsciiIgnoreCase(headers.Slice(i, 17), "Connection: close"u8))

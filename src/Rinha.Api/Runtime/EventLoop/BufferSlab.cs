@@ -4,7 +4,7 @@ namespace Rinha.Api.Runtime.EventLoop;
 
 internal sealed unsafe class BufferSlab : IDisposable
 {
-    public const int SlotSize = 8192;
+    public const int SlotSize = 2048;
 
     private readonly IntPtr _base;
     private readonly nuint _totalBytes;

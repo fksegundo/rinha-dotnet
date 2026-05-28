@@ -15,10 +15,10 @@ SpecialistIndex index;
 try
 {
     index = SpecialistIndex.Open(RinhaOptions.IndexPath);
-    
+
     if (RinhaOptions.MlockIndex)
         index.MlockMapping();
-        
+
     if (RinhaOptions.PretouchIndex)
         index.PretouchMapping();
 }

@@ -16,7 +16,7 @@ public class IndexWriter
         WriteI32(0); // partition count placeholder
         WriteI32(0); // node count placeholder
         WriteI32(0); // block count placeholder
-        
+
         foreach (var cut in cuts)
             WriteI16(cut);
     }

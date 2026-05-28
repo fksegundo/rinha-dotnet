@@ -490,24 +490,24 @@ internal static class PayloadFlexibleJson
         {
             case JsonTokenType.StartObject:
             case JsonTokenType.StartArray:
-            {
-                int depth = 0;
-                do
                 {
-                    switch (reader.TokenType)
+                    int depth = 0;
+                    do
                     {
-                        case JsonTokenType.StartObject:
-                        case JsonTokenType.StartArray:
-                            depth++;
-                            break;
-                        case JsonTokenType.EndObject:
-                        case JsonTokenType.EndArray:
-                            depth--;
-                            break;
-                    }
-                } while (depth > 0 && reader.Read());
-                break;
-            }
+                        switch (reader.TokenType)
+                        {
+                            case JsonTokenType.StartObject:
+                            case JsonTokenType.StartArray:
+                                depth++;
+                                break;
+                            case JsonTokenType.EndObject:
+                            case JsonTokenType.EndArray:
+                                depth--;
+                                break;
+                        }
+                    } while (depth > 0 && reader.Read());
+                    break;
+                }
             default:
                 reader.TrySkip();
                 break;

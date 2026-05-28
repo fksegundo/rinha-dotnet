@@ -78,18 +78,8 @@ internal static class FraudScoreFastPath
 
     private static int FindHeaderEnd(ReadOnlySpan<byte> buffer)
     {
-        for (int i = 3; i < buffer.Length; i++)
-        {
-            if (buffer[i] == (byte)'\n'
-                && buffer[i - 1] == (byte)'\r'
-                && buffer[i - 2] == (byte)'\n'
-                && buffer[i - 3] == (byte)'\r')
-            {
-                return i + 1;
-            }
-        }
-
-        return 0;
+        int idx = buffer.IndexOf("\r\n\r\n"u8);
+        return idx >= 0 ? idx + 4 : 0;
     }
 
     private static bool TryGetContentLength(ReadOnlySpan<byte> headers, out int contentLength)
@@ -128,6 +118,9 @@ internal static class FraudScoreFastPath
 
     private static bool ContainsConnectionClose(ReadOnlySpan<byte> headers)
     {
+        if (headers.IndexOf(ConnectionCloseNeedle) >= 0)
+            return true;
+
         for (int i = 0; i + ConnectionCloseNeedle.Length <= headers.Length; i++)
         {
             if (EqualsAsciiIgnoreCase(headers.Slice(i, ConnectionCloseNeedle.Length), ConnectionCloseNeedle))

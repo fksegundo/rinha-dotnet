@@ -8,9 +8,9 @@ public class IndexBuilder
     public byte[] BuildIndex(List<Reference> references, int leafSize, int _flatThreshold)
     {
         leafSize = Math.Max(8, leafSize); // Match LANES=8 clamp from Rust
-        
+
         var cuts = ComputeV0Cuts(references);
-        
+
         var writer = new IndexWriter();
         writer.WriteHeader(references.Count, cuts);
 
@@ -92,7 +92,7 @@ public class IndexBuilder
 
         var values = references.Select(r => r.Vector[0]).ToArray();
         Array.Sort(values);
-        
+
         int n = values.Length;
         var cuts = new short[7];
         for (int i = 0; i < 7; i++)

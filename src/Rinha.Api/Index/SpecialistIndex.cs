@@ -21,15 +21,15 @@ public sealed unsafe class SpecialistIndex : IDisposable
     private int _partitionCount;
     private int _nodeCount;
     private int _blockCount;
+    private byte* _partitionsPtr;
+    private byte* _nodesPtr;
     private byte* _vectorsPtr;
     private byte* _labelsPtr;
 
-    private PartitionRecord[] _partitions = [];
-    private NodeRecord[] _nodes = [];
     private short[] _partitionByKey = [];
     private uint[] _activeKeys = [];
     private short[] _partitionCutsV0 = new short[7];
-    
+
     private bool _hasAvx2;
     private SearchMode _searchMode;
     private long _earlyExitThreshold;
@@ -68,16 +68,15 @@ public sealed unsafe class SpecialistIndex : IDisposable
         for (int i = 0; i < 7; i++)
             _partitionCutsV0[i] = ReadI16(_ptr, 32 + i * 2);
 
-        byte* partitionsPtr = _ptr + 32 + 14;
-        byte* nodesPtr = partitionsPtr + (_partitionCount * IndexFormat.RecordSize);
+        _partitionsPtr = _ptr + 32 + 14;
+        _nodesPtr = _partitionsPtr + (_partitionCount * IndexFormat.RecordSize);
 
-        int vectorsOffset = (int)(nodesPtr - _ptr) + (_nodeCount * IndexFormat.RecordSize);
+        int vectorsOffset = (int)(_nodesPtr - _ptr) + (_nodeCount * IndexFormat.RecordSize);
         int labelsOffset = vectorsOffset + (_blockCount * SearchConstants.Dims * SearchConstants.Lanes * 2);
 
         _vectorsPtr = _ptr + vectorsOffset;
         _labelsPtr = _ptr + labelsOffset;
 
-        LoadTreeMetadata(partitionsPtr, nodesPtr);
         BuildPartitionLookup();
 
         nint mapLen = (nint)_accessor!.Capacity;
@@ -96,18 +95,6 @@ public sealed unsafe class SpecialistIndex : IDisposable
         };
     }
 
-    private void LoadTreeMetadata(byte* partitionsPtr, byte* nodesPtr)
-    {
-        _partitions = new PartitionRecord[_partitionCount];
-        _nodes = new NodeRecord[_nodeCount];
-
-        for (int i = 0; i < _partitionCount; i++)
-            _partitions[i] = Unsafe.ReadUnaligned<PartitionRecord>(partitionsPtr + (i * IndexFormat.RecordSize));
-
-        for (int i = 0; i < _nodeCount; i++)
-            _nodes[i] = Unsafe.ReadUnaligned<NodeRecord>(nodesPtr + (i * IndexFormat.RecordSize));
-    }
-
     private void BuildPartitionLookup()
     {
         _partitionByKey = new short[IndexFormat.PartitionKeySlots];
@@ -116,7 +103,7 @@ public sealed unsafe class SpecialistIndex : IDisposable
         var active = new List<uint>();
         for (int i = 0; i < _partitionCount; i++)
         {
-            uint key = (uint)_partitions[i].Key;
+            uint key = (uint)ReadI32(PartitionPtr(i), 0);
             if (key < IndexFormat.PartitionKeySlots)
             {
                 _partitionByKey[key] = (short)i;
@@ -137,16 +124,16 @@ public sealed unsafe class SpecialistIndex : IDisposable
     public void PretouchMapping()
     {
         if (_ptr == null || _accessor == null) return;
-        
+
         long capacity = _accessor.Capacity;
         long checksum = 0;
-        
+
         // Port of pretouch_all: read every 4KiB
         for (long i = 0; i < capacity; i += 4096)
         {
             checksum += _ptr[i];
         }
-        
+
         // Last byte
         if (capacity > 0)
         {
@@ -226,7 +213,7 @@ public sealed unsafe class SpecialistIndex : IDisposable
 
         for (int idx = 0; idx < _partitionCount; idx++)
         {
-            long bound = LowerBoundBoxRecord(query, ref _partitions[idx]);
+            long bound = LowerBoundBoxRecord(query, PartitionPtr(idx));
             partitionEntries[partitionLen++] = (bound, idx);
         }
 
@@ -238,7 +225,7 @@ public sealed unsafe class SpecialistIndex : IDisposable
             if (bound >= bestDists[SearchConstants.K - 1])
                 break;
 
-            SearchNodeIterative(_partitions[idx].Root, bound, query, bestDists, bestLabels);
+            SearchNodeIterative(ReadI32(PartitionPtr(idx), 4), bound, query, bestDists, bestLabels);
         }
     }
 
@@ -249,11 +236,11 @@ public sealed unsafe class SpecialistIndex : IDisposable
 
         if (primaryIdx >= 0)
         {
-            ref PartitionRecord primary = ref _partitions[primaryIdx];
-            long bound = LowerBoundBoxRecord(query, ref primary);
+            byte* primary = PartitionPtr(primaryIdx);
+            long bound = LowerBoundBoxRecord(query, primary);
             if (bound < bestDists[SearchConstants.K - 1])
             {
-                SearchNodeIterative(primary.Root, bound, query, bestDists, bestLabels);
+                SearchNodeIterative(ReadI32(primary, 4), bound, query, bestDists, bestLabels);
                 if (ShouldEarlyExit(bestDists))
                     return;
             }
@@ -269,7 +256,7 @@ public sealed unsafe class SpecialistIndex : IDisposable
             if (idx == primaryIdx)
                 continue;
 
-            long bound = LowerBoundBoxRecord(query, ref _partitions[idx]);
+            long bound = LowerBoundBoxRecord(query, PartitionPtr(idx));
             if (bound < bestDists[SearchConstants.K - 1])
             {
                 partitionEntries[partitionLen++] = (bound, idx);
@@ -284,7 +271,7 @@ public sealed unsafe class SpecialistIndex : IDisposable
             if (bound >= bestDists[SearchConstants.K - 1])
                 break;
 
-            SearchNodeIterative(_partitions[idx].Root, bound, query, bestDists, bestLabels);
+            SearchNodeIterative(ReadI32(PartitionPtr(idx), 4), bound, query, bestDists, bestLabels);
             if (ShouldEarlyExit(bestDists))
                 break;
         }
@@ -303,21 +290,21 @@ public sealed unsafe class SpecialistIndex : IDisposable
         {
             if (currentBound <= bestDists[SearchConstants.K - 1])
             {
-                ref NodeRecord node = ref _nodes[current];
-                int left = node.Left;
-                int right = node.Right;
+                byte* node = NodePtr(current);
+                int left = ReadI32(node, 0);
+                int right = ReadI32(node, 4);
 
                 if (left < 0 || right < 0)
                 {
-                    ScanLeaf(node.Start, node.Len, query, bestDists, bestLabels);
+                    ScanLeaf(ReadI32(node, 8), ReadI32(node, 12), query, bestDists, bestLabels);
                 }
                 else
                 {
                     if (Sse.IsSupported)
-                        Sse.Prefetch0(Unsafe.AsPointer(ref _nodes[right]));
+                        Sse.Prefetch0(NodePtr(right));
 
-                    long lb = LowerBoundBoxRecord(query, ref _nodes[left]);
-                    long rb = LowerBoundBoxRecord(query, ref _nodes[right]);
+                    long lb = LowerBoundBoxRecord(query, NodePtr(left));
+                    long rb = LowerBoundBoxRecord(query, NodePtr(right));
 
                     int nearIdx;
                     long nearBound;
@@ -395,20 +382,6 @@ public sealed unsafe class SpecialistIndex : IDisposable
             for (int i = 0; i < laneCount; i++)
                 InsertBest(blockDists[i], _labelsPtr[labelsBase + i], bestDists, bestLabels);
         }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private long LowerBoundBoxRecord(Span<short> query, ref PartitionRecord record)
-    {
-        fixed (PartitionRecord* ptr = &record)
-            return LowerBoundBoxRecord(query, (byte*)ptr);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private long LowerBoundBoxRecord(Span<short> query, ref NodeRecord record)
-    {
-        fixed (NodeRecord* ptr = &record)
-            return LowerBoundBoxRecord(query, (byte*)ptr);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -594,11 +567,17 @@ public sealed unsafe class SpecialistIndex : IDisposable
             else
                 break;
         }
-        
+
         key |= bucket << 5;
 
         return key;
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private byte* PartitionPtr(int index) => _partitionsPtr + index * IndexFormat.RecordSize;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private byte* NodePtr(int index) => _nodesPtr + index * IndexFormat.RecordSize;
 
     private static string ReadString(byte* ptr, int offset, int length)
     {

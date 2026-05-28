@@ -12,7 +12,7 @@ public static unsafe class EpollLoop
     private const int MaxClientFd = 65536;
     private const int DefaultRecvFdBudget = 32;
     private const int DefaultEpollTimeoutMs = 1;
-    private const int SlotSize = 8192;
+    private const int SlotSize = 2048;
 
     public static void Run(string socketPath, AppState state, Action onListenerReady)
     {
@@ -294,21 +294,21 @@ public static unsafe class EpollLoop
                 switch (RawHttpParser.TryParse(slice, out var request, out int rawConsumed, out var reject))
                 {
                     case RawHttpParseResult.Complete:
-                    {
-                        totalReqs++;
-                        var rawResponse = RawHttpHandler.BuildResponse(request, state);
-                        processed += rawConsumed;
-                        var leftoverOff = processed;
-                        var leftoverLen = used - processed;
-                        StartWrite(fd, epollFd, slots, buf, rawResponse, leftoverOff, leftoverLen, request.KeepAlive, registered, useEdgeTriggered, state);
-                        return;
-                    }
+                        {
+                            totalReqs++;
+                            var rawResponse = RawHttpHandler.BuildResponse(request, state);
+                            processed += rawConsumed;
+                            var leftoverOff = processed;
+                            var leftoverLen = used - processed;
+                            StartWrite(fd, epollFd, slots, buf, rawResponse, leftoverOff, leftoverLen, request.KeepAlive, registered, useEdgeTriggered, state);
+                            return;
+                        }
                     case RawHttpParseResult.Reject:
-                    {
-                        processed += rawConsumed;
-                        StartWrite(fd, epollFd, slots, buf, reject, 0, 0, false, registered, useEdgeTriggered, state);
-                        return;
-                    }
+                        {
+                            processed += rawConsumed;
+                            StartWrite(fd, epollFd, slots, buf, reject, 0, 0, false, registered, useEdgeTriggered, state);
+                            return;
+                        }
                     case RawHttpParseResult.NeedMore:
                         if (processed > 0)
                         {
