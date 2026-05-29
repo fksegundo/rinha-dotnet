@@ -59,7 +59,7 @@ services:
           memory: "170M"
 
   lb:
-    image: ghcr.io/fksegundo/rinha-api-lb:sha-ee837aa
+    image: ghcr.io/fksegundo/rinha-dotnet-lb:latest
     pull_policy: always
     cpuset: "2,3"
     restart: always
