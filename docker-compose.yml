@@ -1,6 +1,6 @@
 services:
   api1:
-    image: ghcr.io/fksegundo/rinha-dotnet:latest
+    image: ghcr.io/fksegundo/rinha-dotnet:ab254bf
     pull_policy: always
     cpuset: "0"
     restart: always
@@ -29,7 +29,7 @@ services:
           memory: "170M"
 
   api2:
-    image: ghcr.io/fksegundo/rinha-dotnet:latest
+    image: ghcr.io/fksegundo/rinha-dotnet:ab254bf
     pull_policy: always
     cpuset: "1"
     restart: always
@@ -74,7 +74,7 @@ services:
       resources:
         limits:
           cpus: "0.1"
-          memory: "6M"
+          memory: "10M"
     depends_on:
       - api1
       - api2
