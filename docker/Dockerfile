@@ -14,7 +14,7 @@ RUN dotnet restore src/Rinha.Preprocess/Rinha.Preprocess.csproj && \
     dotnet restore src/Rinha.Api/Rinha.Api.csproj -r linux-x64 -p:PublishAot=true
 
 ARG REFERENCES_GZ=/src/references.json.gz
-ARG RINHA_LEAF_SIZE=56
+ARG RINHA_LEAF_SIZE=48
 ENV RINHA_LEAF_SIZE=${RINHA_LEAF_SIZE}
 COPY resources/references.json.gz* ${REFERENCES_GZ}
 
