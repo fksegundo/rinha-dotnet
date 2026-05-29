@@ -63,13 +63,12 @@ public class IndexBuilder
 
         for (int b = 0; b < totalBlocks; b++)
         {
-            for (int p = 0; p < 7; p++)
+            for (int d = 0; d < Constants.Dim; d++)
             {
                 for (int l = 0; l < Constants.Lanes; l++)
                 {
                     var vec = _allBlocks[b * Constants.Lanes + l].Vector;
-                    writer.WriteI16(vec[p * 2]);
-                    writer.WriteI16(vec[p * 2 + 1]);
+                    writer.WriteI16(vec[d]);
                 }
             }
         }
