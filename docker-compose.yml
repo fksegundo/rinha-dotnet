@@ -1,6 +1,6 @@
 services:
   api1:
-    image: filonsegundo/rinha-dotnet:baseline-net-n2-n3
+    image: filonsegundo/rinha-dotnet:baseline-net-n2
     cpuset: "0"
     restart: always
     logging:
@@ -11,6 +11,7 @@ services:
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
       RINHA_PRETOUCH_INDEX: "1"
       RINHA_MLOCK_INDEX: "1"
+      RINHA_RECV_FD_BUDGET: "64"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     ulimits:
@@ -26,7 +27,7 @@ services:
           memory: "169M"
 
   api2:
-    image: filonsegundo/rinha-dotnet:baseline-net-n2-n3
+    image: filonsegundo/rinha-dotnet:baseline-net-n2
     cpuset: "1"
     restart: always
     network_mode: "none"
@@ -38,6 +39,7 @@ services:
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
       RINHA_PRETOUCH_INDEX: "1"
       RINHA_MLOCK_INDEX: "1"
+      RINHA_RECV_FD_BUDGET: "64"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
     ulimits:
@@ -53,7 +55,7 @@ services:
           memory: "169M"
 
   lb:
-    image: filonsegundo/rinha-dotnet-lb:baseline-net-n2-n3
+    image: filonsegundo/rinha-dotnet-lb:baseline-net-n2
     cpuset: "2,3"
     restart: always
     user: "0:0"
