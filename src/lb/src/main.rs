@@ -7,7 +7,6 @@ use std::time::Duration;
 const PORT: u16 = 9999;
 const UPSTREAMS: [&str; 2] = ["/sockets/api1.sock", "/sockets/api2.sock"];
 const BACKLOG: i32 = 65_535;
-const MAX_EVENTS: i32 = 256;
 const ACCEPT_BATCH_LIMIT: u32 = 64;
 const WARMUP_ATTEMPTS: u32 = 300;
 const WARMUP_INTERVAL: Duration = Duration::from_millis(10);
@@ -64,49 +63,38 @@ fn main() {
     let mut controls: [Option<ControlChannel>; 2] = [None, None];
     warmup_controls(&mut controls);
 
-    let epoll_fd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
-    if epoll_fd < 0 {
-        panic!("epoll_create1 failed: {}", io::Error::last_os_error());
-    }
-
-    let mut event = libc::epoll_event {
-        events: libc::EPOLLIN as u32,
-        u64: listener_fd as u64,
-    };
-
-    if unsafe { libc::epoll_ctl(epoll_fd, libc::EPOLL_CTL_ADD, listener_fd, &mut event) } != 0 {
-        panic!("epoll_ctl failed: {}", io::Error::last_os_error());
-    }
-
     let mut upstream_idx = 0usize;
     let mut reconnect_needed = [false; 2];
-    let mut events = [libc::epoll_event { events: 0, u64: 0 }; MAX_EVENTS as usize];
+    let mut poll_fd = libc::pollfd {
+        fd: listener_fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
 
     loop {
         reconnect_controls(&mut controls, &mut reconnect_needed);
 
-        let ready = unsafe { libc::epoll_wait(epoll_fd, events.as_mut_ptr(), MAX_EVENTS, -1) };
+        poll_fd.revents = 0;
+        let ready = unsafe { libc::poll(&mut poll_fd, 1, -1) };
         if ready < 0 {
             let err = io::Error::last_os_error();
             if err.raw_os_error() == Some(libc::EINTR) {
                 continue;
             }
-            eprintln!("epoll_wait error: {err}");
+            eprintln!("poll error: {err}");
             break;
         }
 
-        for i in 0..ready as usize {
-            if events[i].u64 as RawFd != listener_fd {
-                continue;
-            }
-
-            accept_burst(
-                listener_fd,
-                &mut upstream_idx,
-                &mut controls,
-                &mut reconnect_needed,
-            );
+        if ready == 0 || (poll_fd.revents & libc::POLLIN) == 0 {
+            continue;
         }
+
+        accept_burst(
+            listener_fd,
+            &mut upstream_idx,
+            &mut controls,
+            &mut reconnect_needed,
+        );
     }
 }
 
@@ -183,7 +171,10 @@ fn warmup_one(path: &str) -> Option<ControlChannel> {
     None
 }
 
-fn reconnect_controls(controls: &mut [Option<ControlChannel>; 2], reconnect_needed: &mut [bool; 2]) {
+fn reconnect_controls(
+    controls: &mut [Option<ControlChannel>; 2],
+    reconnect_needed: &mut [bool; 2],
+) {
     for idx in 0..UPSTREAMS.len() {
         if !reconnect_needed[idx] || controls[idx].is_some() {
             continue;

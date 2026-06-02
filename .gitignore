@@ -12,4 +12,8 @@ resources/test-data.json
 resources/references.json
 resources/references.json.gz
 bench-results/
+analysis/
+docs/
+results/
+src/lb/target/
 .DS_Store
