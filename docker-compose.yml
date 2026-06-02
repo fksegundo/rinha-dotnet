@@ -1,7 +1,6 @@
-# Compose para branch submission de fksegundo/rinha-dotnet (teste Mac Mini via issue).
 services:
   api1:
-    image: filonsegundo/rinha-dotnet:net-n2
+    image: filonsegundo/rinha-dotnet:baseline-dh
     cpuset: "0"
     restart: always
     logging:
@@ -12,15 +11,14 @@ services:
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
       RINHA_PRETOUCH_INDEX: "1"
       RINHA_MLOCK_INDEX: "1"
-      RINHA_MAX_SECONDARY_PARTITIONS: "0"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
-    volumes:
-      - sockets:/sockets
     ulimits:
       memlock:
         soft: -1
         hard: -1
+    volumes:
+      - sockets:/sockets
     deploy:
       resources:
         limits:
@@ -28,7 +26,7 @@ services:
           memory: "169M"
 
   api2:
-    image: filonsegundo/rinha-dotnet:net-n2
+    image: filonsegundo/rinha-dotnet:baseline-dh
     cpuset: "1"
     restart: always
     network_mode: "none"
@@ -40,15 +38,14 @@ services:
       RINHA_INDEX_PATH: /app/index/rinha-specialist.idx
       RINHA_PRETOUCH_INDEX: "1"
       RINHA_MLOCK_INDEX: "1"
-      RINHA_MAX_SECONDARY_PARTITIONS: "0"
       DOTNET_gcServer: "0"
       MALLOC_ARENA_MAX: "2"
-    volumes:
-      - sockets:/sockets
     ulimits:
       memlock:
         soft: -1
         hard: -1
+    volumes:
+      - sockets:/sockets
     deploy:
       resources:
         limits:
@@ -56,7 +53,7 @@ services:
           memory: "169M"
 
   lb:
-    image: filonsegundo/rinha-dotnet-lb:net-n2
+    image: filonsegundo/rinha-dotnet-lb:baseline-dh
     cpuset: "2,3"
     restart: always
     user: "0:0"
