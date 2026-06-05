@@ -7,9 +7,9 @@ public class IndexWriter
 {
     private readonly List<byte> _buf = new();
 
-    public void WriteHeader(int referenceCount, ReadOnlySpan<short> cuts)
+    public void WriteHeader(int referenceCount, PartitionScheme scheme)
     {
-        _buf.AddRange("RNSPCST2"u8.ToArray());
+        _buf.AddRange("RNSPCST5"u8.ToArray());
         WriteI32(Constants.Scale);
         WriteI32(Constants.PackedDim);
         WriteI32(referenceCount);
@@ -17,8 +17,17 @@ public class IndexWriter
         WriteI32(0); // node count placeholder
         WriteI32(0); // block count placeholder
 
-        foreach (var cut in cuts)
-            WriteI16(cut);
+        WriteI16(scheme.SchemeId);
+        WriteI16((short)scheme.TreeDepth);
+        WriteI16(0); // amountCutCount (legacy)
+        WriteI16(0); // dowCutCount (legacy)
+        WriteI16((short)scheme.TreePredicates.Count);
+        foreach (var predicate in scheme.TreePredicates)
+        {
+            WriteU8(predicate.Dim);
+            WriteU8((byte)(predicate.Enabled ? 1 : 0));
+            WriteI16(predicate.Threshold);
+        }
     }
 
     public void WritePartitionCount(int count)
@@ -75,9 +84,7 @@ public class IndexWriter
         _buf.Add(v);
     }
 
-    public byte[] IntoBytes() => _buf.ToArray();
-
-    private void WriteU32(uint v)
+    public void WriteU32(uint v)
     {
         Span<byte> bytes = stackalloc byte[4];
         BinaryPrimitives.WriteUInt32LittleEndian(bytes, v);
@@ -87,7 +94,7 @@ public class IndexWriter
         _buf.Add(bytes[3]);
     }
 
-    private void WriteI32(int v)
+    public void WriteI32(int v)
     {
         Span<byte> bytes = stackalloc byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(bytes, v);
@@ -96,4 +103,15 @@ public class IndexWriter
         _buf.Add(bytes[2]);
         _buf.Add(bytes[3]);
     }
+
+    public void AlignTo(int align)
+    {
+        int padding = (align - (_buf.Count % align)) % align;
+        for (int i = 0; i < padding; i++)
+        {
+            _buf.Add(0);
+        }
+    }
+
+    public byte[] IntoBytes() => _buf.ToArray();
 }

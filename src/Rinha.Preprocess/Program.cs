@@ -1,4 +1,4 @@
-﻿using Rinha.Preprocess;
+using Rinha.Preprocess;
 
 if (args.Length < 2)
 {
@@ -15,7 +15,8 @@ int leafSize = int.TryParse(Environment.GetEnvironmentVariable("RINHA_LEAF_SIZE"
 
 var references = ReferenceLoader.LoadReferences(inputPath);
 var builder = new IndexBuilder();
-var indexBytes = builder.BuildIndex(references, leafSize, 128);
+string schemeName = Environment.GetEnvironmentVariable("RINHA_PARTITION_SCHEME") ?? "tree256";
+var indexBytes = builder.BuildIndex(references, leafSize, schemeName);
 
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
 File.WriteAllBytes(outputPath, indexBytes);

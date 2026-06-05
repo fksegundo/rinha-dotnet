@@ -1,23 +1,28 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace Rinha.Preprocess;
 
 public class IndexBuilder
 {
-    private readonly List<(short[] Vector, byte Label)> _allBlocks = new();
+    private readonly List<(short[] Vector, byte Label, uint RefIndex)> _allBlocks = new();
     private readonly List<NodeEntry> _nodes = new();
 
-    public byte[] BuildIndex(List<Reference> references, int leafSize, int _flatThreshold)
+    public byte[] BuildIndex(List<Reference> references, int leafSize, string schemeName)
     {
-        leafSize = Math.Max(8, leafSize); // Match LANES=8 clamp from Rust
+        leafSize = Math.Clamp(leafSize, Constants.Lanes, 2048);
 
-        var cuts = ComputeV0Cuts(references);
+        var scheme = PartitionScheme.ByName(schemeName);
+        scheme.Prepare(references);
 
         var writer = new IndexWriter();
-        writer.WriteHeader(references.Count, cuts);
+        writer.WriteHeader(references.Count, scheme);
 
         var partitions = new Dictionary<uint, List<int>>();
         for (int i = 0; i < references.Count; i++)
         {
-            uint key = PartitionKey.Compute(references[i].Vector, cuts);
+            uint key = scheme.ComputeKey(references[i].Vector);
             if (!partitions.TryGetValue(key, out var list))
             {
                 list = new List<int>();
@@ -29,10 +34,12 @@ public class IndexBuilder
         var sortedKeys = partitions.Keys.Order().ToList();
         var partitionMeta = new List<(uint key, int root)>();
 
+        string splitStrategy = Environment.GetEnvironmentVariable("RINHA_KD_SPLIT_STRATEGY") ?? "widest";
+
         foreach (var key in sortedKeys)
         {
             var indices = partitions[key];
-            int root = BuildNode(references, indices, leafSize);
+            int root = BuildNode(references, indices, leafSize, splitStrategy);
             partitionMeta.Add((key, root));
         }
 
@@ -61,18 +68,21 @@ public class IndexBuilder
         int totalBlocks = _allBlocks.Count / Constants.Lanes;
         writer.WriteBlockCount(totalBlocks);
 
+        // Write vectors in pair-SoA AVX2 layout
         for (int b = 0; b < totalBlocks; b++)
         {
-            for (int d = 0; d < Constants.Dim; d++)
+            for (int pair = 0; pair < Constants.Dim / 2; pair++)
             {
                 for (int l = 0; l < Constants.Lanes; l++)
                 {
-                    var vec = _allBlocks[b * Constants.Lanes + l].Vector;
-                    writer.WriteI16(vec[d]);
+                    var (vec, _, _) = _allBlocks[b * Constants.Lanes + l];
+                    writer.WriteI16(vec[pair * 2]);
+                    writer.WriteI16(vec[pair * 2 + 1]);
                 }
             }
         }
 
+        // Write labels
         for (int b = 0; b < totalBlocks; b++)
         {
             for (int l = 0; l < Constants.Lanes; l++)
@@ -82,29 +92,29 @@ public class IndexBuilder
             }
         }
 
+        // Align to u32 alignment boundary
+        writer.AlignTo(sizeof(uint));
+
+        // Write reference indices
+        for (int b = 0; b < totalBlocks; b++)
+        {
+            for (int l = 0; l < Constants.Lanes; l++)
+            {
+                var refIndex = _allBlocks[b * Constants.Lanes + l].RefIndex;
+                writer.WriteU32(refIndex);
+            }
+        }
+
+        // Write node class bits
+        foreach (var node in _nodes)
+        {
+            writer.WriteU8(node.ClassBits);
+        }
+
         return writer.IntoBytes();
     }
 
-    private static short[] ComputeV0Cuts(List<Reference> references)
-    {
-        if (references.Count < 8)
-            return new short[7];
-
-        var values = references.Select(r => r.Vector[0]).ToArray();
-        Array.Sort(values);
-
-        int n = values.Length;
-        var cuts = new short[7];
-        for (int i = 0; i < 7; i++)
-        {
-            int idx = ((i + 1) * n) / 8;
-            idx = Math.Min(idx, n - 1);
-            cuts[i] = values[idx];
-        }
-        return cuts;
-    }
-
-    private int BuildNode(List<Reference> references, List<int> indices, int leafSize)
+    private int BuildNode(List<Reference> references, List<int> indices, int leafSize, string splitStrategy)
     {
         var min = new short[Constants.PackedDim];
         var max = new short[Constants.PackedDim];
@@ -125,12 +135,13 @@ public class IndexBuilder
         }
 
         int nodeIdx = _nodes.Count;
-        _nodes.Add(new NodeEntry(-1, -1, 0, 0, (short[])min.Clone(), (short[])max.Clone()));
+        _nodes.Add(new NodeEntry(-1, -1, 0, 0, (short[])min.Clone(), (short[])max.Clone(), 0));
 
         if (indices.Count <= leafSize)
         {
             int leafStart = _allBlocks.Count;
             int blocks = (indices.Count + Constants.Lanes - 1) / Constants.Lanes;
+            byte classBits = 0;
 
             for (int b = 0; b < blocks; b++)
             {
@@ -139,29 +150,34 @@ public class IndexBuilder
                     int i = b * Constants.Lanes + l;
                     if (i < indices.Count)
                     {
-                        var refItem = references[indices[i]];
-                        _allBlocks.Add((refItem.Vector, refItem.Label));
+                        int refIdx = indices[i];
+                        var refItem = references[refIdx];
+                        classBits |= (byte)(1 << Math.Min((int)refItem.Label, 7));
+                        _allBlocks.Add((refItem.Vector, refItem.Label, (uint)refIdx));
                     }
                     else
                     {
-                        _allBlocks.Add((new short[Constants.PackedDim], 0));
+                        _allBlocks.Add((new short[Constants.PackedDim], 0, uint.MaxValue));
                     }
                 }
             }
 
-            _nodes[nodeIdx] = new NodeEntry(-1, -1, leafStart, indices.Count, (short[])min.Clone(), (short[])max.Clone());
+            _nodes[nodeIdx] = new NodeEntry(-1, -1, leafStart, indices.Count, (short[])min.Clone(), (short[])max.Clone(), classBits);
             return nodeIdx;
         }
 
-        int splitDim = WidestDimension(min, max);
+        int splitDim = splitStrategy == "variance"
+            ? VarianceDimension(references, indices, min, max)
+            : WidestDimension(min, max);
+
         var sorted = indices.OrderBy(idx => references[idx].Vector[splitDim]).ToList();
 
         int leftLen = sorted.Count / 2;
         var leftIndices = sorted.Take(leftLen).ToList();
         var rightIndices = sorted.Skip(leftLen).ToList();
 
-        int leftNode = BuildNode(references, leftIndices, leafSize);
-        int rightNode = BuildNode(references, rightIndices, leafSize);
+        int leftNode = BuildNode(references, leftIndices, leafSize, splitStrategy);
+        int rightNode = BuildNode(references, rightIndices, leafSize, splitStrategy);
 
         var leftInfo = _nodes[leftNode];
         var rightInfo = _nodes[rightNode];
@@ -172,7 +188,8 @@ public class IndexBuilder
             leftInfo.Start,
             leftInfo.Len + rightInfo.Len,
             (short[])min.Clone(),
-            (short[])max.Clone()
+            (short[])max.Clone(),
+            (byte)(leftInfo.ClassBits | rightInfo.ClassBits)
         );
 
         return nodeIdx;
@@ -194,5 +211,35 @@ public class IndexBuilder
         return bestDim;
     }
 
-    private readonly record struct NodeEntry(int Left, int Right, int Start, int Len, short[] Min, short[] Max);
+    private static int VarianceDimension(List<Reference> references, List<int> indices, ReadOnlySpan<short> min, ReadOnlySpan<short> max)
+    {
+        long n = indices.Count;
+        int bestDim = WidestDimension(min, max);
+        double bestScore = double.MinValue;
+
+        for (int d = 0; d < Constants.Dim; d++)
+        {
+            if (min[d] == max[d]) continue;
+
+            long sum = 0;
+            long sumSq = 0;
+            foreach (int idx in indices)
+            {
+                long v = references[idx].Vector[d];
+                sum += v;
+                sumSq += v * v;
+            }
+
+            double score = (double)n * sumSq - (double)sum * sum;
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestDim = d;
+            }
+        }
+
+        return bestDim;
+    }
+
+    private readonly record struct NodeEntry(int Left, int Right, int Start, int Len, short[] Min, short[] Max, byte ClassBits);
 }

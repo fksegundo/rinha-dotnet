@@ -22,7 +22,7 @@ public class IndexParityTests
             MakeRef([13000, 0, 5000, 0, 0, 0, 0, 0, 3000, 0, 0, 0, 0, 0], 1),
         };
 
-        var bytes = new IndexBuilder().BuildIndex(references, 8, 128);
+        var bytes = new IndexBuilder().BuildIndex(references, 8, "tree256");
         var path = Path.Combine(Path.GetTempPath(), $"rinha-test-{Guid.NewGuid():N}.idx");
         File.WriteAllBytes(path, bytes);
 
