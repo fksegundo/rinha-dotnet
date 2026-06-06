@@ -1,7 +1,6 @@
 using Rinha.Api.Http;
 using Rinha.Api.Index;
 using Rinha.Api.Options;
-using Rinha.Api.Parsing;
 using Rinha.Api.Vector;
 
 namespace Rinha.Api.Runtime;

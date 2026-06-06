@@ -54,6 +54,6 @@ public static class ReferenceLoader
             return 0;
         if (value >= 1.0)
             return (short)Constants.Scale;
-        return (short)Math.Round(value * Constants.Scale);
+        return (short)Math.Round(value * Constants.Scale, MidpointRounding.AwayFromZero);
     }
 }

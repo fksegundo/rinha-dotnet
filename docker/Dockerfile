@@ -14,7 +14,7 @@ RUN dotnet restore src/Rinha.Preprocess/Rinha.Preprocess.csproj && \
     dotnet restore src/Rinha.Api/Rinha.Api.csproj -r linux-x64 -p:PublishAot=true
 
 ARG REFERENCES_GZ=/src/references.json.gz
-ARG RINHA_LEAF_SIZE=48
+ARG RINHA_LEAF_SIZE=128
 ENV RINHA_LEAF_SIZE=${RINHA_LEAF_SIZE}
 COPY resources/references.json.gz* ${REFERENCES_GZ}
 
@@ -35,6 +35,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build /out/app/ ./
 COPY --from=build /out/index/ ./index/
+COPY resources/warmup-payloads.jsonl ./resources/
 ENV RINHA_INDEX_PATH=/app/index/rinha-specialist.idx
 ENV RINHA_SEARCH_MODE=key-first
 ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libmimalloc.so.3

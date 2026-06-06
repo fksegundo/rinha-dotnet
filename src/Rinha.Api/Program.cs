@@ -47,12 +47,40 @@ if (RinhaOptions.UseFdPassing)
         return;
     }
 
-    Action markReady = () => state.MarkReady();
+    Action onReadyCallback = () =>
+    {
+        Task.Run(async () =>
+        {
+            // Give a short delay to ensure the event loop has started and bound to the socket,
+            // allowing the load balancer to connect.
+            await Task.Delay(100);
+
+            SelfWarmup.Start(state);
+
+            bool useNoGc = Environment.GetEnvironmentVariable("RINHA_NO_GC") == "1";
+            if (useNoGc)
+            {
+                long gcBudget = int.TryParse(Environment.GetEnvironmentVariable("RINHA_NO_GC_BUDGET_MB"), out var mb) ? mb * 1024L * 1024L : 50 * 1024L * 1024L;
+                try
+                {
+                    GC.TryStartNoGCRegion(gcBudget);
+                    Console.WriteLine($"[GC] Started No-GC Region with {gcBudget / (1024 * 1024)}MB budget.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[GC] Failed to start No-GC Region: {ex.Message}");
+                }
+            }
+
+            state.MarkReady();
+            Console.WriteLine("[Ready] API is now ready for public traffic.");
+        });
+    };
 
     if (RinhaOptions.UseEventLoop)
-        EpollLoop.Run(RinhaOptions.FdSocketPath!, state, markReady);
+        EpollLoop.Run(RinhaOptions.FdSocketPath!, state, onReadyCallback);
     else
-        FdSocketServer.Run(RinhaOptions.FdSocketPath!, state, markReady);
+        FdSocketServer.Run(RinhaOptions.FdSocketPath!, state, onReadyCallback);
     return;
 }
 
@@ -61,7 +89,26 @@ _ = Task.Run(() =>
     try
     {
         StartupWarmup.RunDefault(state.Index);
+
+        SelfWarmup.Start(state);
+
+        bool useNoGc = Environment.GetEnvironmentVariable("RINHA_NO_GC") == "1";
+        if (useNoGc)
+        {
+            long gcBudget = int.TryParse(Environment.GetEnvironmentVariable("RINHA_NO_GC_BUDGET_MB"), out var mb) ? mb * 1024L * 1024L : 50 * 1024L * 1024L;
+            try
+            {
+                GC.TryStartNoGCRegion(gcBudget);
+                Console.WriteLine($"[GC] Started No-GC Region with {gcBudget / (1024 * 1024)}MB budget.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[GC] Failed to start No-GC Region: {ex.Message}");
+            }
+        }
+
         state.MarkReady();
+        Console.WriteLine("[Ready] API is now ready for public traffic.");
     }
     catch (Exception ex)
     {
@@ -81,7 +128,7 @@ app.MapGet("/ready", (AppState s) =>
 
 app.MapPost("/fraud-score", async (HttpRequest request, AppState s, CancellationToken ct) =>
 {
-    if (!s.Ready)
+    if (!s.Ready && !s.AcceptWarmup)
         return Results.StatusCode(503);
 
     var (ok, buffer, length) = await RequestBody.ReadAsync(request, ct);

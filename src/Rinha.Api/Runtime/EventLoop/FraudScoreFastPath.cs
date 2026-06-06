@@ -30,7 +30,7 @@ internal static class FraudScoreFastPath
         if (!buffer.StartsWith(PostPrefix))
             return false;
 
-        if (!state.Ready)
+        if (!state.Ready && !state.AcceptWarmup)
         {
             response = RawHttpResponses.NotReady;
             consumed = FindHeaderEnd(buffer);
@@ -88,7 +88,7 @@ internal static class FraudScoreFastPath
         int i = 0;
         while (i + ContentLengthNeedle.Length <= headers.Length)
         {
-            if (EqualsAsciiIgnoreCase(headers.Slice(i, ContentLengthNeedle.Length), ContentLengthNeedle))
+            if (AsciiHelpers.EqualsAsciiIgnoreCase(headers.Slice(i, ContentLengthNeedle.Length), ContentLengthNeedle))
             {
                 ReadOnlySpan<byte> rest = headers.Slice(i + ContentLengthNeedle.Length);
                 int valueStart = 0;
@@ -123,30 +123,11 @@ internal static class FraudScoreFastPath
 
         for (int i = 0; i + ConnectionCloseNeedle.Length <= headers.Length; i++)
         {
-            if (EqualsAsciiIgnoreCase(headers.Slice(i, ConnectionCloseNeedle.Length), ConnectionCloseNeedle))
+            if (AsciiHelpers.EqualsAsciiIgnoreCase(headers.Slice(i, ConnectionCloseNeedle.Length), ConnectionCloseNeedle))
                 return true;
         }
 
         return false;
     }
 
-    private static bool EqualsAsciiIgnoreCase(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
-    {
-        if (left.Length != right.Length)
-            return false;
-
-        for (int i = 0; i < left.Length; i++)
-        {
-            byte a = left[i];
-            byte b = right[i];
-            if (a >= (byte)'A' && a <= (byte)'Z')
-                a = (byte)(a | 0x20);
-            if (b >= (byte)'A' && b <= (byte)'Z')
-                b = (byte)(b | 0x20);
-            if (a != b)
-                return false;
-        }
-
-        return true;
-    }
 }

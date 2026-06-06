@@ -50,7 +50,7 @@ public static class PayloadParser
             return 0;
         if (value >= 1.0)
             return VectorConstants.Scale;
-        return (short)Math.Round(value * VectorConstants.Scale);
+        return (short)Math.Round(value * VectorConstants.Scale, MidpointRounding.AwayFromZero);
     }
 
     private static bool TryParseTransactionFirst(ReadOnlySpan<byte> json, Span<short> output)

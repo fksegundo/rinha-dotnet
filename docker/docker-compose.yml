@@ -15,6 +15,14 @@ services:
       RINHA_CLIENT_FD_PRECONFIGURED: "1"
       RINHA_THREAD_POOL_SIZE: "1"
       DOTNET_gcServer: "0"
+      DOTNET_GCNoAffinity: "1"
+      RINHA_NO_GC: "1"
+      RINHA_NO_GC_BUDGET_MB: "50"
+      RINHA_SELF_WARMUP: "1"
+      RINHA_SELF_WARMUP_URL: "http://lb:9999/fraud-score"
+      RINHA_SELF_WARMUP_DURATION_MS: "25000"
+      RINHA_SELF_WARMUP_CONCURRENCY: "4"
+      RINHA_SELF_WARMUP_PAYLOADS: "/app/resources/warmup-payloads.jsonl"
       MALLOC_ARENA_MAX: "2"
     cpuset: "0"
     ulimits:
@@ -26,6 +34,7 @@ services:
         hard: -1
     volumes:
       - sockets:/sockets
+      - ../test-data/rinha-specialist.idx:/app/index/rinha-specialist.idx:ro
     deploy:
       resources:
         limits:
@@ -49,6 +58,14 @@ services:
       RINHA_CLIENT_FD_PRECONFIGURED: "1"
       RINHA_THREAD_POOL_SIZE: "1"
       DOTNET_gcServer: "0"
+      DOTNET_GCNoAffinity: "1"
+      RINHA_NO_GC: "1"
+      RINHA_NO_GC_BUDGET_MB: "50"
+      RINHA_SELF_WARMUP: "1"
+      RINHA_SELF_WARMUP_URL: "http://lb:9999/fraud-score"
+      RINHA_SELF_WARMUP_DURATION_MS: "15000"
+      RINHA_SELF_WARMUP_CONCURRENCY: "4"
+      RINHA_SELF_WARMUP_PAYLOADS: "/app/resources/warmup-payloads.jsonl"
       MALLOC_ARENA_MAX: "2"
     cpuset: "1"
     ulimits:
@@ -60,6 +77,7 @@ services:
         hard: -1
     volumes:
       - sockets:/sockets
+      - ../test-data/rinha-specialist.idx:/app/index/rinha-specialist.idx:ro
     deploy:
       resources:
         limits:

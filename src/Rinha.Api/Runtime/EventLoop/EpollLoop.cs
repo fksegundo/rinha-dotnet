@@ -222,7 +222,7 @@ public static unsafe class EpollLoop
             Syscalls.SetQuickAck(fd);
         }
 
-        var buf = AllocBuffer();
+        var buf = EpollBufferPool.Alloc();
         var (outcome, used) = GreedyRead(fd, buf, 0);
 
         switch (outcome)
@@ -235,7 +235,7 @@ public static unsafe class EpollLoop
                 slots[fd] = new ConnState { Fd = fd, Phase = ConnPhase.Reading, Buf = buf, Used = 0 };
                 break;
             case ReadOutcome.Closed:
-                FreeBuffer(buf);
+                EpollBufferPool.Free(buf);
                 Syscalls.Close(fd);
                 break;
         }
@@ -262,7 +262,7 @@ public static unsafe class EpollLoop
                 slots[fd] = new ConnState { Fd = fd, Phase = ConnPhase.Reading, Buf = buf, Used = newUsed };
                 break;
             case ReadOutcome.Closed:
-                FreeBuffer(buf);
+                EpollBufferPool.Free(buf);
                 CloseConn(fd, epollFd, slots);
                 break;
         }
@@ -434,7 +434,7 @@ public static unsafe class EpollLoop
                         {
                             return WriteOutcome.DoneReading;
                         }
-                        FreeBuffer(stateObj.Buf);
+                        EpollBufferPool.Free(stateObj.Buf);
                         ShutdownClient(fd, epollFd, registered);
                         return WriteOutcome.Closed;
                     }
@@ -448,7 +448,7 @@ public static unsafe class EpollLoop
                     return WriteOutcome.Wait;
                 }
 
-                FreeBuffer(stateObj.Buf);
+                EpollBufferPool.Free(stateObj.Buf);
                 ShutdownClient(fd, epollFd, registered);
                 return WriteOutcome.Closed;
             }
@@ -471,7 +471,7 @@ public static unsafe class EpollLoop
             ref var s = ref slots[fd];
             if (s.Fd != -1)
             {
-                FreeBuffer(s.Buf);
+                EpollBufferPool.Free(s.Buf);
                 s = default;
                 s.Fd = -1;
             }
@@ -552,26 +552,6 @@ public static unsafe class EpollLoop
         return events;
     }
 
-    // Simple buffer pool using a thread-local stack
-    [ThreadStatic] private static byte[][]? _bufferPool;
-    [ThreadStatic] private static int _bufferPoolCount;
-    private const int MaxPooledBuffers = 256;
-
-    private static byte[] AllocBuffer()
-    {
-        if (_bufferPool != null && _bufferPoolCount > 0)
-            return _bufferPool[--_bufferPoolCount];
-        return new byte[SlotSize];
-    }
-
-    private static void FreeBuffer(byte[]? buf)
-    {
-        if (buf == null) return;
-        _bufferPool ??= new byte[MaxPooledBuffers][];
-        if (_bufferPoolCount < MaxPooledBuffers)
-            _bufferPool[_bufferPoolCount++] = buf;
-    }
-
     private static int GetEnvInt(string name, int defaultValue)
     {
         var val = Environment.GetEnvironmentVariable(name);
@@ -589,21 +569,4 @@ public static unsafe class EpollLoop
     private static extern int umask(int mask);
 
     private static void Umask(int mask) => umask(mask);
-
-    internal enum ConnPhase { Reading, Writing }
-    internal enum ReadOutcome { Data, WouldBlock, Closed }
-    internal enum WriteOutcome { DoneReading, Wait, Closed }
-
-    internal struct ConnState
-    {
-        public int Fd;
-        public ConnPhase Phase;
-        public byte[] Buf;
-        public int Used;
-        public int Written;
-        public ReadOnlyMemory<byte> Response;
-        public int LeftoverOff;
-        public int LeftoverLen;
-        public bool KeepAlive;
-    }
 }
