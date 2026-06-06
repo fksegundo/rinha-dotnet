@@ -1,6 +1,6 @@
 services:
   api1:
-    image: filonsegundo/rinha-dotnet:baseline-net-n2
+    image: ghcr.io/fksegundo/rinha-dotnet:46988cf
     cpuset: "0"
     restart: always
     logging:
@@ -27,7 +27,7 @@ services:
           memory: "169M"
 
   api2:
-    image: filonsegundo/rinha-dotnet:baseline-net-n2
+    image: ghcr.io/fksegundo/rinha-dotnet:46988cf
     cpuset: "1"
     restart: always
     network_mode: "none"
@@ -55,7 +55,7 @@ services:
           memory: "169M"
 
   lb:
-    image: filonsegundo/rinha-dotnet-lb:baseline-net-n2
+    image: ghcr.io/fksegundo/rinha-dotnet-lb:46988cf
     cpuset: "2,3"
     restart: always
     user: "0:0"
