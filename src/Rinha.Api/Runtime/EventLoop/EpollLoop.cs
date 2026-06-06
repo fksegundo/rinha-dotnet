@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Rinha.Api.Http;
 using Rinha.Api.Options;
@@ -22,7 +23,12 @@ public static unsafe class EpollLoop
         if (schedFifo > 0)
             Syscalls.SetSchedFifo(schedFifo);
 
+        var timerSlackNs = GetEnvInt("RINHA_TIMER_SLACK_NS", 0);
+        if (timerSlackNs >= 0)
+            Syscalls.SetTimerSlackNs((ulong)timerSlackNs);
+
         var epollTimeoutMs = GetEnvInt("RINHA_EPOLL_TIMEOUT_MS", DefaultEpollTimeoutMs);
+        var spinBeforeBlockUs = GetEnvInt("RINHA_SPIN_BEFORE_BLOCK_US", 0);
         var recvFdBudget = GetEnvInt("RINHA_RECV_FD_BUDGET", DefaultRecvFdBudget);
         var acceptBudget = GetEnvInt("RINHA_ACCEPT_BUDGET", 0);
         var clientFdPreconfigured = RinhaOptions.ClientFdPreconfigured;
@@ -79,13 +85,30 @@ public static unsafe class EpollLoop
         long totalReqs = 0;
         long heartbeatAt = heartbeatMs > 0 ? Environment.TickCount64 + heartbeatMs : long.MaxValue;
 
-        Console.WriteLine("[EpollLoop] Single-threaded event loop running...");
+        long spinThresholdTicks = spinBeforeBlockUs > 0
+            ? (long)(spinBeforeBlockUs * Stopwatch.Frequency / 1_000_000.0)
+            : 0;
+
+        Console.WriteLine($"[EpollLoop] Single-threaded event loop running... (spin_before_block={spinBeforeBlockUs}us)");
 
         while (true)
         {
             try
             {
-                int ready = Syscalls.EpollWait(epollFd, events, MaxEvents, epollTimeoutMs);
+                int ready = Syscalls.EpollWait(epollFd, events, MaxEvents, 0);
+                if (ready == 0 && spinBeforeBlockUs > 0)
+                {
+                    long spinEnd = Stopwatch.GetTimestamp() + spinThresholdTicks;
+                    while (ready == 0 && Stopwatch.GetTimestamp() < spinEnd)
+                    {
+                        Thread.SpinWait(10);
+                        ready = Syscalls.EpollWait(epollFd, events, MaxEvents, 0);
+                    }
+                }
+                if (ready == 0)
+                {
+                    ready = Syscalls.EpollWait(epollFd, events, MaxEvents, epollTimeoutMs);
+                }
                 if (ready < 0)
                 {
                     int err = Marshal.GetLastPInvokeError();

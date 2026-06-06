@@ -18,8 +18,8 @@ services:
       DOTNET_GCNoAffinity: "1"
       RINHA_NO_GC: "1"
       RINHA_NO_GC_BUDGET_MB: "100"
-      RINHA_MLOCK_ALL: "1"
-      RINHA_SCHED_FIFO: "1"
+      #RINHA_MLOCK_ALL: "1"
+      RINHA_TIMER_SLACK_NS: "1"
       RINHA_SELF_WARMUP: "1"
       RINHA_SELF_WARMUP_URL: "http://lb:9999/fraud-score"
       RINHA_SELF_WARMUP_DURATION_MS: "25000"
@@ -27,8 +27,6 @@ services:
       RINHA_SELF_WARMUP_PAYLOADS: "/app/resources/warmup-payloads.jsonl"
       MALLOC_ARENA_MAX: "2"
     cpuset: "0"
-    cap_add:
-      - SYS_NICE
     ulimits:
       nofile:
         soft: 65535
@@ -65,8 +63,8 @@ services:
       DOTNET_GCNoAffinity: "1"
       RINHA_NO_GC: "1"
       RINHA_NO_GC_BUDGET_MB: "100"
-      RINHA_MLOCK_ALL: "1"
-      RINHA_SCHED_FIFO: "1"
+      #RINHA_MLOCK_ALL: "1"
+      RINHA_TIMER_SLACK_NS: "1"
       RINHA_SELF_WARMUP: "1"
       RINHA_SELF_WARMUP_URL: "http://lb:9999/fraud-score"
       RINHA_SELF_WARMUP_DURATION_MS: "15000"
@@ -74,8 +72,6 @@ services:
       RINHA_SELF_WARMUP_PAYLOADS: "/app/resources/warmup-payloads.jsonl"
       MALLOC_ARENA_MAX: "2"
     cpuset: "1"
-    cap_add:
-      - SYS_NICE
     ulimits:
       nofile:
         soft: 65535

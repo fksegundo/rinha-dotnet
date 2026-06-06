@@ -32,7 +32,7 @@ internal static unsafe class Syscalls
     internal const int Eintr = 4;
     internal const int ResultEagain = -2;
     internal const int EfdClOexec = 0x80000;
-    internal const int Epiocsparams = 0x40087001;
+    internal const int Epiocsparams = 0x40088A01;
     private const int FGetFl = 3;
     private const int FSetFl = 4;
     private const int SigPipe = 13;
@@ -290,6 +290,22 @@ internal static unsafe class Syscalls
     private static extern int setsockopt(int socket, int level, int optionName, int* optionValue, int optionLen);
 
     [DllImport("libc", SetLastError = true)]
+    private static extern int prctl(int option, ulong arg2, ulong arg3, ulong arg4, ulong arg5);
+
+    private const int PrSetTimerslack = 29;
+
+    public static void SetTimerSlackNs(ulong ns)
+    {
+        int rc = prctl(PrSetTimerslack, ns, 0, 0, 0);
+        if (rc < 0)
+        {
+            int err = Marshal.GetLastPInvokeError();
+            if (err != 22) // EINVAL
+                Console.WriteLine($"[Syscalls] prctl PR_SET_TIMERSLACK failed: {err}");
+        }
+    }
+
+    [DllImport("libc", SetLastError = true)]
     private static extern int recvmsg(int sockfd, MsgHdr* msg, int flags);
 
     [DllImport("libc", SetLastError = true)]
@@ -316,7 +332,7 @@ internal static unsafe class Syscalls
     [DllImport("libc", SetLastError = true)]
     private static extern int ioctl(int fd, ulong request, void* arg);
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
     internal struct EpollParams
     {
         public uint BusyPollUsecs;
@@ -345,7 +361,9 @@ internal static unsafe class Syscalls
         int rc = ioctl(epollFd, Epiocsparams, &ep);
         if (rc < 0)
         {
-            Console.WriteLine($"[Syscalls] EPIOCSPARAMS failed (busy_poll_us={busyPollUs}): {Marshal.GetLastPInvokeError()}");
+            int err = Marshal.GetLastPInvokeError();
+            if (err != 22 && err != 25 && err != 95) // EINVAL, ENOTTY, EOPNOTSUPP
+                Console.WriteLine($"[Syscalls] EPIOCSPARAMS failed (busy_poll_us={busyPollUs}): {err}");
         }
     }
 
