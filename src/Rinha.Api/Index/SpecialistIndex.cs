@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -578,18 +577,8 @@ public sealed unsafe class SpecialistIndex : IDisposable
 
     private static void SortPartitionEntries(Span<(int bound, int idx)> entries, int length)
     {
-        for (int i = 1; i < length; i++)
-        {
-            var current = entries[i];
-            int j = i - 1;
-            while (j >= 0 && entries[j].bound > current.bound)
-            {
-                entries[j + 1] = entries[j];
-                j--;
-            }
-
-            entries[j + 1] = current;
-        }
+        if (length > 1)
+            entries.Slice(0, length).Sort((a, b) => a.bound.CompareTo(b.bound));
     }
 
     public uint ComputePartitionKey(short* vector)
@@ -631,15 +620,9 @@ public sealed unsafe class SpecialistIndex : IDisposable
         return System.Text.Encoding.ASCII.GetString(ptr + offset, length);
     }
 
-    private static int ReadI32(byte* ptr, int offset)
-    {
-        return BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(ptr + offset, 4));
-    }
+    private static int ReadI32(byte* ptr, int offset) => Unsafe.ReadUnaligned<int>(ptr + offset);
 
-    private static short ReadI16(byte* ptr, int offset)
-    {
-        return BinaryPrimitives.ReadInt16LittleEndian(new ReadOnlySpan<byte>(ptr + offset, 2));
-    }
+    private static short ReadI16(byte* ptr, int offset) => Unsafe.ReadUnaligned<short>(ptr + offset);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int AlignCursor(int cursor, int align)

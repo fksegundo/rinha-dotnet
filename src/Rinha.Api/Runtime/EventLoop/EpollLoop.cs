@@ -18,6 +18,10 @@ public static unsafe class EpollLoop
     {
         Syscalls.IgnoreSigPipe();
 
+        var schedFifo = GetEnvInt("RINHA_SCHED_FIFO", 0);
+        if (schedFifo > 0)
+            Syscalls.SetSchedFifo(schedFifo);
+
         var epollTimeoutMs = GetEnvInt("RINHA_EPOLL_TIMEOUT_MS", DefaultEpollTimeoutMs);
         var recvFdBudget = GetEnvInt("RINHA_RECV_FD_BUDGET", DefaultRecvFdBudget);
         var acceptBudget = GetEnvInt("RINHA_ACCEPT_BUDGET", 0);

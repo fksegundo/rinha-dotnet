@@ -349,9 +349,34 @@ internal static unsafe class Syscalls
         }
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct SchedParam
+    {
+        public int SchedPriority;
+    }
+
+    internal const int SchedFifo = 1;
+
+    public static void SetSchedFifo(int priority)
+    {
+        var param = new SchedParam { SchedPriority = priority };
+        int rc = sched_setscheduler(0, SchedFifo, &param);
+        if (rc < 0)
+        {
+            Console.WriteLine($"[Syscalls] sched_setscheduler failed: {Marshal.GetLastPInvokeError()}");
+        }
+        else
+        {
+            Console.WriteLine($"[Syscalls] SCHED_FIFO set (priority={priority})");
+        }
+    }
+
     private static int GetEnvInt(string name, int defaultValue)
     {
         var val = Environment.GetEnvironmentVariable(name);
         return val != null && int.TryParse(val, out var n) ? n : defaultValue;
     }
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int sched_setscheduler(int pid, int policy, SchedParam* param);
 }

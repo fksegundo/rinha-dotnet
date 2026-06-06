@@ -1,6 +1,7 @@
 using System.Buffers.Text;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Rinha.Api.Vector;
 
 namespace Rinha.Api.Parsing;
@@ -390,7 +391,7 @@ public static class PayloadParser
 
         while (i + 8 <= value.Length)
         {
-            ulong word = BitConverter.ToUInt64(value.Slice(i));
+            ulong word = Unsafe.ReadUnaligned<ulong>(ref Unsafe.AddByteOffset(ref MemoryMarshal.GetReference(value), (nint)(uint)i));
             hash = BitOperations.RotateLeft(hash, 5) ^ word;
             hash *= kMul;
             i += 8;
