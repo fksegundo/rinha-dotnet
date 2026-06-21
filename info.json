@@ -1,14 +1,20 @@
 {
-    "participants": ["Filon Krause Segundo"],
+    "participants": [
+        "Filon Krause Segundo"
+    ],
     "social": [
         "https://github.com/fksegundo/",
         "https://www.linkedin.com/in/filonsegundo/"
     ],
     "source-code-repo": "https://github.com/fksegundo/rinha-rust",
     "stack": [
-        ".net",
+        ".net 11",
         "c#",
-        "python",
-        "rust"
+        "native aot",
+        "rust",
+        "custom load balancer",
+        "unix sockets",
+        "mmap",
+        "mimalloc"
     ]
 }
